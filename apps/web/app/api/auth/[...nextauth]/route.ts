@@ -11,15 +11,21 @@ const handler = NextAuth(authOptions());
  * Per-email rate limit for the email OTP flow. The NextAuth handler itself has
  * no rate limiting and the proxy middleware excludes `/api`, so without this an
  * attacker can brute-force the 6-digit code (`/callback/email`) or mailbomb an
- * address (`/signin/email`). Keyed on the target email so guesses/sends are
- * capped per victim regardless of source IP.
+ * address (`/signin/email`).
+ *
+ * Keying: when the target email is present the bucket is per-email, so guesses
+ * and sends are capped per victim regardless of source IP. This is a deliberate
+ * trade-off favouring mailbomb / brute-force protection; the short 15-minute
+ * code lifetime bounds any victim-targeted bucket exhaustion to that window. If
+ * the email is absent we fall back to the firewall's default per-IP bucket
+ * rather than lumping all email-less requests into one shared key.
  *
  * Requires the `rl_auth_otp_verify` / `rl_auth_otp_send` rules to be configured
  * in the Vercel Firewall; absent that, this fails open (see `isRateLimited`).
  */
 async function otpRateLimited(req: NextRequest): Promise<boolean> {
 	const path = req.nextUrl.pathname;
-	const isVerify = path.includes("/callback/email");
+	const isVerify = path.endsWith("/callback/email");
 	const isSend = path.endsWith("/signin/email");
 	if (!isVerify && !isSend) return false;
 
@@ -39,8 +45,10 @@ async function otpRateLimited(req: NextRequest): Promise<boolean> {
 		? RATE_LIMIT_IDS.AUTH_OTP_VERIFY
 		: RATE_LIMIT_IDS.AUTH_OTP_SEND;
 
+	const normalizedEmail = email?.trim().toLowerCase();
+
 	return isRateLimited(ruleId, {
-		key: `${ruleId}:${(email ?? "unknown").toLowerCase()}`,
+		key: normalizedEmail ? `${ruleId}:${normalizedEmail}` : undefined,
 		headers: req.headers,
 	});
 }
