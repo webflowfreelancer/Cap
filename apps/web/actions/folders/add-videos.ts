@@ -48,12 +48,12 @@ export async function addVideosToFolder(
 		// space folders require space-admin or org admin/owner access.
 		if (folder.spaceId === null) {
 			if (folder.createdById !== user.id) {
-				throw new Error("You don't have permission to manage this folder");
+				throw new Error("Folder not found");
 			}
 		} else {
 			const access = await getSpaceAccess(user.id, folder.spaceId);
 			if (!access?.canManage) {
-				throw new Error("You don't have permission to manage this folder");
+				throw new Error("Folder not found");
 			}
 		}
 

@@ -4,7 +4,7 @@ import { makeCurrentUserLayer } from "@cap/web-backend";
 import { Folder } from "@cap/web-domain";
 import { Effect } from "effect";
 import { notFound } from "next/navigation";
-import { getOrganizationAccess } from "@/actions/organization/authorization";
+import { getSpaceAccess } from "@/actions/organization/space-authorization";
 import {
 	getChildFolders,
 	getFolderBreadcrumb,
@@ -32,22 +32,31 @@ const FolderPage = async (props: PageProps<"/dashboard/folder/[id]">) => {
 	const user = await getCurrentUser();
 	if (!user || !user.activeOrganizationId) return notFound();
 
-	// Ensure the folder belongs to a space/org the caller can access before
+	// Ensure the folder belongs to a space the caller can access before
 	// disclosing its contents (mirrors FoldersPolicy: personal folders are
-	// creator-only, space/org folders require org membership/ownership).
+	// creator-only, space folders require space/org membership). A missing folder
+	// surfaces as notFound() rather than an unhandled 500.
 	const folderForAccess = await getFolderById(folderId).pipe(
 		Effect.provide(makeCurrentUserLayer(user)),
+		Effect.catchAll(() => Effect.succeed(null)),
 		runPromise,
 	);
+
+	if (!folderForAccess) return notFound();
 
 	if (folderForAccess.spaceId === null) {
 		if (folderForAccess.createdById !== user.id) return notFound();
 	} else {
-		const access = await getOrganizationAccess(
-			user.id,
-			folderForAccess.organizationId,
-		);
-		if (!access) return notFound();
+		// getSpaceAccess returns a non-null object even for non-members (both roles
+		// null), so check for an actual role. Using space access (not org-only)
+		// keeps legitimate space members who aren't org members from being blocked.
+		const access = await getSpaceAccess(user.id, folderForAccess.spaceId);
+		if (
+			!access ||
+			(access.organizationRole === null && access.spaceRole === null)
+		) {
+			return notFound();
+		}
 	}
 
 	return Effect.gen(function* () {

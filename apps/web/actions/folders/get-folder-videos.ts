@@ -5,7 +5,6 @@ import { getCurrentUser } from "@cap/database/auth/session";
 import { folders, sharedVideos, spaceVideos } from "@cap/database/schema";
 import type { Folder, Space, Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
-import { getOrganizationAccess } from "@/actions/organization/authorization";
 import { getSpaceAccess } from "@/actions/organization/space-authorization";
 
 export async function getFolderVideoIds(
@@ -38,11 +37,10 @@ export async function getFolderVideoIds(
 		}
 
 		if (folder.spaceId === null) {
-			const access = await getOrganizationAccess(
-				user.id,
-				folder.organizationId,
-			);
-			if (!access && folder.createdById !== user.id) {
+			// Personal folders are creator-only (mirrors FoldersPolicy.canEdit and
+			// add-videos.ts); org membership must NOT grant access to another user's
+			// personal folder.
+			if (folder.createdById !== user.id) {
 				throw new Error("Folder not found");
 			}
 		} else {
