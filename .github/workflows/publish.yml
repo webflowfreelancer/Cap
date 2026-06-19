@@ -200,6 +200,20 @@ jobs:
         if: ${{ runner.os == 'Linux' }}
         uses: ./.github/actions/install-desktop-deps
 
+      # The fat-LTO + codegen-units=1 + debug release link of cap-desktop OOMs
+      # the 16GB standard Linux runner. Add swap as headroom for the link.
+      - name: Add swap space
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          sudo swapoff -a || true
+          sudo rm -f /mnt/swapfile
+          sudo fallocate -l 14G /mnt/swapfile || sudo dd if=/dev/zero of=/mnt/swapfile bs=1M count=14336
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
       - name: Create API Key File
         if: ${{ runner.os == 'macOS' }}
         run: echo "${{ secrets.APPLE_API_KEY_FILE }}" > api.p8
@@ -278,6 +292,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           RUST_TARGET_TRIPLE: ${{ matrix.settings.target }}
+          # Drop release debuginfo on Linux to keep the LTO link under the 16GB
+          # runner's memory limit. macOS/Windows keep it for Sentry symbol upload.
+          CARGO_PROFILE_RELEASE_DEBUG: ${{ runner.os == 'Linux' && 'false' || 'true' }}
 
       - name: Upload unsigned Windows installer
         if: ${{ runner.os == 'Windows' }}
