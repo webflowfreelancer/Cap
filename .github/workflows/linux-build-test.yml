@@ -17,7 +17,7 @@ concurrency:
 jobs:
   build:
     name: Build desktop (linux)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest-8-cores
     permissions:
       contents: read
     env:
@@ -27,17 +27,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Add swap space
-        shell: bash
-        run: |
-          sudo swapoff -a || true
-          sudo rm -f /mnt/swapfile
-          sudo fallocate -l 14G /mnt/swapfile || sudo dd if=/dev/zero of=/mnt/swapfile bs=1M count=14336
-          sudo chmod 600 /mnt/swapfile
-          sudo mkswap /mnt/swapfile
-          sudo swapon /mnt/swapfile
-          free -h
 
       - name: Read version number
         uses: SebRollen/toml-action@v1.0.2
@@ -95,10 +84,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           RUST_TARGET_TRIPLE: x86_64-unknown-linux-gnu
-          # Linux release link OOMs on the 16GB runner with fat LTO + full
-          # debuginfo. Linux doesn't upload debug symbols to Sentry, so dropping
-          # release debuginfo here cuts peak link memory with no lost capability.
-          CARGO_PROFILE_RELEASE_DEBUG: "false"
 
       - name: List produced bundles
         if: always()
