@@ -11,6 +11,8 @@ import {
 import type { Folder, Space, Video } from "@cap/web-domain";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { requireOrganizationSettingsManager } from "@/actions/organization/authorization";
+import { getSpaceAccess } from "@/actions/organization/space-authorization";
 export async function moveVideoToFolder({
 	videoId,
 	folderId,
@@ -54,6 +56,11 @@ export async function moveVideoToFolder({
 	}
 
 	if (spaceId && !isAllSpacesEntry) {
+		const access = await getSpaceAccess(user.id, spaceId);
+		if (!access?.canManage) {
+			throw new Error("You don't have permission to manage this space");
+		}
+
 		await db()
 			.update(spaceVideos)
 			.set({
@@ -63,6 +70,11 @@ export async function moveVideoToFolder({
 				and(eq(spaceVideos.videoId, videoId), eq(spaceVideos.spaceId, spaceId)),
 			);
 	} else if (spaceId && isAllSpacesEntry) {
+		await requireOrganizationSettingsManager(
+			user.id,
+			user.activeOrganizationId,
+		);
+
 		await db()
 			.update(sharedVideos)
 			.set({
@@ -80,7 +92,7 @@ export async function moveVideoToFolder({
 			.set({
 				folderId: folderId === null ? null : folderId,
 			})
-			.where(eq(videos.id, videoId));
+			.where(and(eq(videos.id, videoId), eq(videos.ownerId, user.id)));
 	}
 
 	// Always revalidate the main caps page

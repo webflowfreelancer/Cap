@@ -4,6 +4,7 @@ import { makeCurrentUserLayer } from "@cap/web-backend";
 import { Folder } from "@cap/web-domain";
 import { Effect } from "effect";
 import { notFound } from "next/navigation";
+import { getOrganizationAccess } from "@/actions/organization/authorization";
 import {
 	getChildFolders,
 	getFolderBreadcrumb,
@@ -30,6 +31,24 @@ const FolderPage = async (props: PageProps<"/dashboard/folder/[id]">) => {
 
 	const user = await getCurrentUser();
 	if (!user || !user.activeOrganizationId) return notFound();
+
+	// Ensure the folder belongs to a space/org the caller can access before
+	// disclosing its contents (mirrors FoldersPolicy: personal folders are
+	// creator-only, space/org folders require org membership/ownership).
+	const folderForAccess = await getFolderById(folderId).pipe(
+		Effect.provide(makeCurrentUserLayer(user)),
+		runPromise,
+	);
+
+	if (folderForAccess.spaceId === null) {
+		if (folderForAccess.createdById !== user.id) return notFound();
+	} else {
+		const access = await getOrganizationAccess(
+			user.id,
+			folderForAccess.organizationId,
+		);
+		if (!access) return notFound();
+	}
 
 	return Effect.gen(function* () {
 		const [childFolders, breadcrumb, videosData, share] = yield* Effect.all(

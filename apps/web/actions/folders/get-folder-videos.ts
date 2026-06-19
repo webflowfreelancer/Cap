@@ -2,9 +2,11 @@
 
 import { db } from "@cap/database";
 import { getCurrentUser } from "@cap/database/auth/session";
-import { sharedVideos, spaceVideos } from "@cap/database/schema";
+import { folders, sharedVideos, spaceVideos } from "@cap/database/schema";
 import type { Folder, Space, Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
+import { getOrganizationAccess } from "@/actions/organization/authorization";
+import { getSpaceAccess } from "@/actions/organization/space-authorization";
 
 export async function getFolderVideoIds(
 	folderId: Folder.FolderId,
@@ -19,6 +21,41 @@ export async function getFolderVideoIds(
 
 		if (!folderId) {
 			throw new Error("Folder ID is required");
+		}
+
+		// Ensure the caller can see this folder before disclosing its contents.
+		const [folder] = await db()
+			.select({
+				spaceId: folders.spaceId,
+				organizationId: folders.organizationId,
+				createdById: folders.createdById,
+			})
+			.from(folders)
+			.where(eq(folders.id, folderId));
+
+		if (!folder) {
+			throw new Error("Folder not found");
+		}
+
+		if (folder.spaceId === null) {
+			const access = await getOrganizationAccess(
+				user.id,
+				folder.organizationId,
+			);
+			if (!access && folder.createdById !== user.id) {
+				throw new Error("Folder not found");
+			}
+		} else {
+			// getSpaceAccess returns a non-null object even for non-members (with
+			// both roles null), so a bare `!access` check would NOT block them.
+			// Require an actual org or space role to view the folder's contents.
+			const access = await getSpaceAccess(user.id, folder.spaceId);
+			if (
+				!access ||
+				(access.organizationRole === null && access.spaceRole === null)
+			) {
+				throw new Error("Folder not found");
+			}
 		}
 
 		const isAllSpacesEntry = user.activeOrganizationId === spaceId;
