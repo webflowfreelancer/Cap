@@ -610,22 +610,34 @@ app.post(
 						? `${header.slice(0, DISCORD_MESSAGE_MAX_LENGTH - 1)}…`
 						: header;
 
-				const response = await fetch(discordWebhookUrl, {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						content,
-						allowed_mentions: { parse: [] },
-					}),
-				});
+				// Discord delivery is best-effort: the bundle is already in S3 and
+				// the download URL is valid, so a webhook failure must not turn the
+				// whole request into a 500 (which would make the client re-upload).
+				try {
+					const response = await fetch(discordWebhookUrl, {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({
+							content,
+							allowed_mentions: { parse: [] },
+						}),
+					});
 
-				if (!response.ok) {
-					throw new Error(
-						`Failed to send session profile to Discord: ${response.statusText}`,
+					if (response.ok) {
+						discordDelivered = true;
+					} else {
+						console.error(
+							"Failed to send session profile to Discord:",
+							response.status,
+							await response.text(),
+						);
+					}
+				} catch (discordError) {
+					console.error(
+						"Failed to send session profile to Discord:",
+						discordError,
 					);
 				}
-
-				discordDelivered = true;
 			}
 
 			return c.json({ success: true, downloadUrl, discordDelivered });
