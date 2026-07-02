@@ -1,0 +1,24 @@
+---
+title: Custom Recordings Path & Windows Reliability Fixes
+app: Cap Desktop
+publishedAt: "2026-07-02"
+version: 0.5.4
+image:
+---
+
+A focused release with a new custom recordings storage location and a set of Windows and recording reliability fixes.
+
+## Features
+
+- **Custom recordings storage path** - Choose where Cap stores your recordings from Settings -> General, instead of always using the default location.
+
+## Fixes
+
+- **Windows ghost overlay after recording** - Removed Cap Target Select from the default excluded windows list so it no longer leaves a ghost overlay behind after recording on Windows, with existing installs migrated automatically on startup.
+- **Windows screenshot clipboard fix** - Screenshots copied to the clipboard on Windows are now composited onto a white background first, fixing screenshots that previously pasted with a black or transparent backdrop.
+- **Mic/video sync double-count fix** - Fixed an audio/video sync issue where trimmed microphone samples could be double-counted, throwing off the mic offset calculation in the editor.
+- **Safer recordings folder handling** - Added error logging, safer path conversion, and better error handling around recordings folder commands so failures are easier to diagnose instead of failing silently.
+
+## Performance
+
+- **Faster file exports** - Exporting to a file now skips an unnecessary transparency pixel scan, speeding up the export pipeline.
