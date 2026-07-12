@@ -1,14 +1,31 @@
+use serde::Serialize;
+use serde_json::{Map, Value};
 use std::{
+    future::Future,
     sync::{
         OnceLock, PoisonError, RwLock,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
 use tauri::AppHandle;
-use tracing::error;
+use tauri_plugin_store::StoreExt;
+use tokio::sync::mpsc;
+use tracing::{debug, error, warn};
+use uuid::Uuid;
 
-use crate::auth::AuthStore;
+use crate::{
+    auth::{AuthSecret, AuthStore},
+    general_settings::GeneralSettingsStore,
+    web_api::ManagerExt,
+};
+
+const PRODUCT_EVENT_QUEUE_CAPACITY: usize = 100;
+const PRODUCT_EVENT_BATCH_SIZE: usize = 20;
+const PRODUCT_EVENT_BATCH_DELAY: Duration = Duration::from_millis(250);
+const PRODUCT_EVENT_RETRY_DELAY: Duration = Duration::from_millis(500);
+const PRODUCT_EVENT_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
+const PRODUCT_EVENT_SESSION_STORE_KEY: &str = "product_analytics_session_id";
 
 #[derive(Debug)]
 pub enum PostHogEvent {
@@ -106,43 +123,58 @@ pub enum PostHogEvent {
 fn truncate_reason(mut s: String) -> String {
     const MAX_LEN: usize = 240;
     if s.len() > MAX_LEN {
-        s.truncate(MAX_LEN);
+        let mut end = MAX_LEN;
+        while !s.is_char_boundary(end) {
+            end = end.saturating_sub(1);
+        }
+        s.truncate(end);
         s.push('…');
     }
     s
 }
 
-fn posthog_event(event: PostHogEvent, distinct_id: Option<&str>) -> posthog_rs::Event {
-    fn make_event(name: &str, distinct_id: Option<&str>) -> posthog_rs::Event {
-        match distinct_id {
-            Some(id) => posthog_rs::Event::new(name, id),
-            None => posthog_rs::Event::new_anon(name),
+#[derive(Clone, Debug)]
+struct EventData {
+    name: &'static str,
+    properties: Map<String, Value>,
+}
+
+impl EventData {
+    fn new(name: &'static str) -> Self {
+        Self {
+            name,
+            properties: Map::new(),
         }
     }
 
-    fn set(e: &mut posthog_rs::Event, key: &str, value: impl serde::Serialize) {
-        e.insert_prop(key, value)
-            .map_err(|err| error!("Error adding PostHog property {key}: {err:?}"))
-            .ok();
+    fn set(&mut self, key: &str, value: impl Serialize) {
+        match serde_json::to_value(value) {
+            Ok(value) => {
+                self.properties.insert(key.to_string(), value);
+            }
+            Err(err) => error!("Error serializing analytics property {key}: {err:?}"),
+        }
     }
+}
 
+fn event_data(event: PostHogEvent) -> EventData {
     match event {
         PostHogEvent::MultipartUploadComplete {
             duration,
             length,
             size,
         } => {
-            let mut e = make_event("multipart_upload_complete", distinct_id);
-            set(&mut e, "duration", duration.as_secs());
-            set(&mut e, "length", length.as_secs());
-            set(&mut e, "size", size);
-            e
+            let mut data = EventData::new("multipart_upload_complete");
+            data.set("duration", duration.as_secs());
+            data.set("length", length.as_secs());
+            data.set("size", size);
+            data
         }
         PostHogEvent::MultipartUploadFailed { duration, error } => {
-            let mut e = make_event("multipart_upload_failed", distinct_id);
-            set(&mut e, "duration", duration.as_secs());
-            set(&mut e, "error", truncate_reason(error));
-            e
+            let mut data = EventData::new("multipart_upload_failed");
+            data.set("duration", duration.as_secs());
+            data.set("error", truncate_reason(error));
+            data
         }
         PostHogEvent::RecordingStarted {
             mode,
@@ -156,18 +188,18 @@ fn posthog_event(event: PostHogEvent, distinct_id: Option<&str>) -> posthog_rs::
             fragmented,
             custom_cursor_capture,
         } => {
-            let mut e = make_event("recording_started", distinct_id);
-            set(&mut e, "mode", mode);
-            set(&mut e, "target_kind", target_kind);
-            set(&mut e, "has_camera", has_camera);
-            set(&mut e, "has_mic", has_mic);
-            set(&mut e, "has_system_audio", has_system_audio);
-            set(&mut e, "target_fps", target_fps);
-            set(&mut e, "target_width", target_width);
-            set(&mut e, "target_height", target_height);
-            set(&mut e, "fragmented", fragmented);
-            set(&mut e, "custom_cursor_capture", custom_cursor_capture);
-            e
+            let mut data = EventData::new("recording_started");
+            data.set("mode", mode);
+            data.set("target_kind", target_kind);
+            data.set("has_camera", has_camera);
+            data.set("has_mic", has_mic);
+            data.set("has_system_audio", has_system_audio);
+            data.set("target_fps", target_fps);
+            data.set("target_width", target_width);
+            data.set("target_height", target_height);
+            data.set("fragmented", fragmented);
+            data.set("custom_cursor_capture", custom_cursor_capture);
+            data
         }
         PostHogEvent::RecordingCompleted {
             mode,
@@ -191,68 +223,58 @@ fn posthog_event(event: PostHogEvent, distinct_id: Option<&str>) -> posthog_rs::
             audio_degraded_count,
             dropped_mic_messages,
         } => {
-            let mut e = make_event("recording_completed", distinct_id);
-            set(&mut e, "mode", mode);
-            set(&mut e, "status", status);
-            set(&mut e, "duration_secs", duration_secs);
-            set(&mut e, "segment_count", segment_count);
-            set(&mut e, "track_failure_count", track_failure_count);
+            let mut data = EventData::new("recording_completed");
+            data.set("mode", mode);
+            data.set("status", status);
+            data.set("duration_secs", duration_secs);
+            data.set("segment_count", segment_count);
+            data.set("track_failure_count", track_failure_count);
             if let Some(ec) = error_class {
-                set(&mut e, "error_class", truncate_reason(ec));
+                data.set("error_class", truncate_reason(ec));
             }
-            set(&mut e, "video_frames_captured", video_frames_captured);
-            set(&mut e, "video_frames_dropped", video_frames_dropped);
-            set(
-                &mut e,
-                "drop_rate_pct",
-                (drop_rate_pct * 100.0).round() / 100.0,
-            );
-            set(&mut e, "capture_stalls_count", capture_stalls_count);
-            set(&mut e, "capture_stalls_max_ms", capture_stalls_max_ms);
-            set(&mut e, "mixer_stalls_count", mixer_stalls_count);
-            set(&mut e, "mixer_stalls_max_ms", mixer_stalls_max_ms);
-            set(&mut e, "audio_gaps_count", audio_gaps_count);
-            set(&mut e, "audio_gaps_total_ms", audio_gaps_total_ms);
-            set(
-                &mut e,
-                "frame_drop_rate_high_count",
-                frame_drop_rate_high_count,
-            );
-            set(&mut e, "source_restarts_count", source_restarts_count);
-            set(&mut e, "muxer_crash_count", muxer_crash_count);
-            set(&mut e, "audio_degraded_count", audio_degraded_count);
-            set(&mut e, "dropped_mic_messages", dropped_mic_messages);
-            e
+            data.set("video_frames_captured", video_frames_captured);
+            data.set("video_frames_dropped", video_frames_dropped);
+            data.set("drop_rate_pct", (drop_rate_pct * 100.0).round() / 100.0);
+            data.set("capture_stalls_count", capture_stalls_count);
+            data.set("capture_stalls_max_ms", capture_stalls_max_ms);
+            data.set("mixer_stalls_count", mixer_stalls_count);
+            data.set("mixer_stalls_max_ms", mixer_stalls_max_ms);
+            data.set("audio_gaps_count", audio_gaps_count);
+            data.set("audio_gaps_total_ms", audio_gaps_total_ms);
+            data.set("frame_drop_rate_high_count", frame_drop_rate_high_count);
+            data.set("source_restarts_count", source_restarts_count);
+            data.set("muxer_crash_count", muxer_crash_count);
+            data.set("audio_degraded_count", audio_degraded_count);
+            data.set("dropped_mic_messages", dropped_mic_messages);
+            data
         }
         PostHogEvent::RecordingMuxerCrashed {
             mode,
             reason,
             seconds_into_recording,
         } => {
-            let mut e = make_event("recording_muxer_crashed", distinct_id);
-            set(&mut e, "mode", mode);
-            set(&mut e, "reason", truncate_reason(reason));
-            set(
-                &mut e,
+            let mut data = EventData::new("recording_muxer_crashed");
+            data.set("mode", mode);
+            data.set("reason", truncate_reason(reason));
+            data.set(
                 "seconds_into_recording",
                 (seconds_into_recording * 1000.0).round() / 1000.0,
             );
-            e
+            data
         }
         PostHogEvent::RecordingAudioDegraded {
             mode,
             reason,
             seconds_into_recording,
         } => {
-            let mut e = make_event("recording_audio_degraded", distinct_id);
-            set(&mut e, "mode", mode);
-            set(&mut e, "reason", truncate_reason(reason));
-            set(
-                &mut e,
+            let mut data = EventData::new("recording_audio_degraded");
+            data.set("mode", mode);
+            data.set("reason", truncate_reason(reason));
+            data.set(
                 "seconds_into_recording",
                 (seconds_into_recording * 1000.0).round() / 1000.0,
             );
-            e
+            data
         }
         PostHogEvent::RecordingRecovered {
             trigger,
@@ -260,70 +282,275 @@ fn posthog_event(event: PostHogEvent, distinct_id: Option<&str>) -> posthog_rs::
             segments_recovered,
             validation_took_ms,
         } => {
-            let mut e = make_event("recording_recovered", distinct_id);
-            set(&mut e, "trigger", trigger);
-            set(&mut e, "recovered_duration_secs", recovered_duration_secs);
-            set(&mut e, "segments_recovered", segments_recovered);
-            set(&mut e, "validation_took_ms", validation_took_ms);
-            e
+            let mut data = EventData::new("recording_recovered");
+            data.set("trigger", trigger);
+            data.set("recovered_duration_secs", recovered_duration_secs);
+            data.set("segments_recovered", segments_recovered);
+            data.set("validation_took_ms", validation_took_ms);
+            data
         }
         PostHogEvent::RecordingRecoveryFailed { trigger, reason } => {
-            let mut e = make_event("recording_recovery_failed", distinct_id);
-            set(&mut e, "trigger", trigger);
-            set(&mut e, "reason", truncate_reason(reason));
-            e
+            let mut data = EventData::new("recording_recovery_failed");
+            data.set("trigger", trigger);
+            data.set("reason", truncate_reason(reason));
+            data
         }
         PostHogEvent::RecordingDiskSpaceLow {
             mode,
             bytes_remaining,
         } => {
-            let mut e = make_event("recording_disk_space_low", distinct_id);
-            set(&mut e, "mode", mode);
-            set(&mut e, "bytes_remaining", bytes_remaining);
-            e
+            let mut data = EventData::new("recording_disk_space_low");
+            data.set("mode", mode);
+            data.set("bytes_remaining", bytes_remaining);
+            data
         }
         PostHogEvent::RecordingDiskSpaceExhausted {
             mode,
             bytes_remaining,
         } => {
-            let mut e = make_event("recording_disk_space_exhausted", distinct_id);
-            set(&mut e, "mode", mode);
-            set(&mut e, "bytes_remaining", bytes_remaining);
-            e
+            let mut data = EventData::new("recording_disk_space_exhausted");
+            data.set("mode", mode);
+            data.set("bytes_remaining", bytes_remaining);
+            data
         }
         PostHogEvent::RecordingDeviceLost { mode, subsystem } => {
-            let mut e = make_event("recording_device_lost", distinct_id);
-            set(&mut e, "mode", mode);
-            set(&mut e, "subsystem", subsystem);
-            e
+            let mut data = EventData::new("recording_device_lost");
+            data.set("mode", mode);
+            data.set("subsystem", subsystem);
+            data
         }
         PostHogEvent::RecordingEncoderRebuilt {
             mode,
             backend,
             attempt,
         } => {
-            let mut e = make_event("recording_encoder_rebuilt", distinct_id);
-            set(&mut e, "mode", mode);
-            set(&mut e, "backend", backend);
-            set(&mut e, "attempt", attempt);
-            e
+            let mut data = EventData::new("recording_encoder_rebuilt");
+            data.set("mode", mode);
+            data.set("backend", backend);
+            data.set("attempt", attempt);
+            data
         }
         PostHogEvent::RecordingSourceAudioReset {
             mode,
             source,
             starvation_ms,
         } => {
-            let mut e = make_event("recording_source_audio_reset", distinct_id);
-            set(&mut e, "mode", mode);
-            set(&mut e, "source", source);
-            set(&mut e, "starvation_ms", starvation_ms);
-            e
+            let mut data = EventData::new("recording_source_audio_reset");
+            data.set("mode", mode);
+            data.set("source", source);
+            data.set("starvation_ms", starvation_ms);
+            data
         }
         PostHogEvent::RecordingCaptureTargetLost { mode, target } => {
-            let mut e = make_event("recording_capture_target_lost", distinct_id);
-            set(&mut e, "mode", mode);
-            set(&mut e, "target", target);
-            e
+            let mut data = EventData::new("recording_capture_target_lost");
+            data.set("mode", mode);
+            data.set("target", target);
+            data
+        }
+    }
+}
+
+fn posthog_event(
+    data: &EventData,
+    distinct_id: &str,
+    process_person_profile: bool,
+) -> posthog_rs::Event {
+    let mut event = posthog_rs::Event::new(data.name, distinct_id);
+    if !process_person_profile {
+        event
+            .insert_prop("$process_person_profile", false)
+            .map_err(|err| error!("Error disabling PostHog person profile: {err:?}"))
+            .ok();
+    }
+    for (key, value) in &data.properties {
+        event
+            .insert_prop(key, value)
+            .map_err(|err| error!("Error adding PostHog property {key}: {err:?}"))
+            .ok();
+    }
+    event
+}
+
+fn is_core_product_event(name: &str) -> bool {
+    matches!(
+        name,
+        "recording_started"
+            | "recording_completed"
+            | "multipart_upload_complete"
+            | "multipart_upload_failed"
+            | "recording_recovery_failed"
+    )
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProductEvent {
+    event_id: String,
+    event_name: &'static str,
+    occurred_at: String,
+    anonymous_id: String,
+    session_id: String,
+    platform: &'static str,
+    app_version: &'static str,
+    properties: Map<String, Value>,
+}
+
+#[derive(Serialize)]
+struct ProductEventBatch<'a> {
+    events: &'a [ProductEvent],
+}
+
+fn product_event(data: &EventData, anonymous_id: String) -> Option<ProductEvent> {
+    if !is_core_product_event(data.name) {
+        return None;
+    }
+
+    Some(ProductEvent {
+        event_id: Uuid::new_v4().to_string(),
+        event_name: data.name,
+        occurred_at: chrono::Utc::now().to_rfc3339(),
+        anonymous_id,
+        session_id: PRODUCT_EVENT_SESSION_ID
+            .get_or_init(Uuid::new_v4)
+            .to_string(),
+        platform: "desktop",
+        app_version: env!("CARGO_PKG_VERSION"),
+        properties: product_event_properties(data),
+    })
+}
+
+fn product_event_properties(data: &EventData) -> Map<String, Value> {
+    data.properties
+        .iter()
+        .filter(|(key, value)| {
+            !matches!(
+                key.as_str(),
+                "error" | "error_message" | "file_name" | "file_path" | "raw_error" | "reason"
+            ) && (value.is_null() || value.is_boolean() || value.is_number() || value.is_string())
+        })
+        .map(|(key, value)| {
+            let value = match value {
+                Value::String(value) => Value::String(truncate_reason(value.clone())),
+                value => value.clone(),
+            };
+            (key.clone(), value)
+        })
+        .collect()
+}
+
+fn live_telemetry_enabled(app: &AppHandle) -> bool {
+    let enabled = GeneralSettingsStore::get(app)
+        .ok()
+        .flatten()
+        .map(|settings| settings.enable_telemetry)
+        .unwrap_or_else(telemetry_enabled);
+    TELEMETRY_ENABLED.store(enabled, Ordering::Release);
+    enabled
+}
+
+fn product_auth_token(app: &AppHandle) -> Option<String> {
+    AuthStore::get(app)
+        .ok()
+        .flatten()
+        .map(|auth| match auth.secret {
+            AuthSecret::ApiKey { api_key } => api_key,
+            AuthSecret::Session { token, .. } => token,
+        })
+}
+
+async fn send_product_batch_once(app: &AppHandle, events: &[ProductEvent]) -> Result<(), String> {
+    if !live_telemetry_enabled(app) {
+        return Ok(());
+    }
+
+    let auth_token = product_auth_token(app);
+    let response = app
+        .api_request("/api/events", |client, url| {
+            let request = client
+                .post(url)
+                .timeout(PRODUCT_EVENT_REQUEST_TIMEOUT)
+                .json(&ProductEventBatch { events });
+            match &auth_token {
+                Some(token) => request.bearer_auth(token),
+                None => request,
+            }
+        })
+        .await
+        .map_err(|err| err.to_string())?;
+
+    if response.status().is_success() || !should_retry_product_status(response.status().as_u16()) {
+        Ok(())
+    } else {
+        Err(format!(
+            "product analytics endpoint returned {}",
+            response.status()
+        ))
+    }
+}
+
+fn should_retry_product_status(status: u16) -> bool {
+    status == 429 || status >= 500
+}
+
+async fn retry_once<F, Fut, E>(mut operation: F, retry_delay: Duration) -> Result<(), E>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<(), E>>,
+{
+    if operation().await.is_ok() {
+        return Ok(());
+    }
+
+    tokio::time::sleep(retry_delay).await;
+    operation().await
+}
+
+async fn run_product_event_worker(app: AppHandle, mut receiver: mpsc::Receiver<ProductEvent>) {
+    while let Some(first) = receiver.recv().await {
+        let mut events = Vec::with_capacity(PRODUCT_EVENT_BATCH_SIZE);
+        events.push(first);
+        let deadline = tokio::time::Instant::now() + PRODUCT_EVENT_BATCH_DELAY;
+
+        while events.len() < PRODUCT_EVENT_BATCH_SIZE {
+            match tokio::time::timeout_at(deadline, receiver.recv()).await {
+                Ok(Some(event)) => events.push(event),
+                Ok(None) | Err(_) => break,
+            }
+        }
+
+        if !live_telemetry_enabled(&app) {
+            continue;
+        }
+
+        if let Err(err) = retry_once(
+            || send_product_batch_once(&app, &events),
+            PRODUCT_EVENT_RETRY_DELAY,
+        )
+        .await
+        {
+            warn!(
+                event_count = events.len(),
+                "Dropping product analytics batch after one retry: {err}"
+            );
+        }
+    }
+}
+
+fn enqueue_product_event(app: &AppHandle, event: ProductEvent) {
+    let sender = PRODUCT_EVENT_SENDER.get_or_init(|| {
+        let (sender, receiver) = mpsc::channel(PRODUCT_EVENT_QUEUE_CAPACITY);
+        tokio::spawn(run_product_event_worker(app.clone(), receiver));
+        sender
+    });
+
+    if let Err(err) = sender.try_send(event) {
+        let dropped = PRODUCT_EVENTS_DROPPED.fetch_add(1, Ordering::Relaxed) + 1;
+        if dropped.is_power_of_two() {
+            debug!(
+                dropped,
+                reason = %err,
+                "Product analytics queue is unavailable; event dropped"
+            );
         }
     }
 }
@@ -339,6 +566,21 @@ pub fn init() {
     }
 }
 
+pub fn init_product_session(app: &AppHandle) {
+    let session_id = PRODUCT_EVENT_SESSION_ID
+        .get_or_init(Uuid::new_v4)
+        .to_string();
+    match app.store("store") {
+        Ok(store) => {
+            store.set(PRODUCT_EVENT_SESSION_STORE_KEY, session_id);
+            if let Err(err) = store.save() {
+                warn!("Failed to persist product analytics session ID: {err}");
+            }
+        }
+        Err(err) => warn!("Failed to access store for product analytics session: {err}"),
+    }
+}
+
 pub fn set_server_url(url: &str) {
     *API_SERVER_IS_CAP_CLOUD
         .get_or_init(Default::default)
@@ -349,6 +591,9 @@ pub fn set_server_url(url: &str) {
 static API_SERVER_IS_CAP_CLOUD: OnceLock<RwLock<Option<bool>>> = OnceLock::new();
 
 static TELEMETRY_ENABLED: AtomicBool = AtomicBool::new(true);
+static PRODUCT_EVENT_SESSION_ID: OnceLock<Uuid> = OnceLock::new();
+static PRODUCT_EVENT_SENDER: OnceLock<mpsc::Sender<ProductEvent>> = OnceLock::new();
+static PRODUCT_EVENTS_DROPPED: AtomicU64 = AtomicU64::new(0);
 
 pub fn set_telemetry_enabled(enabled: bool) {
     TELEMETRY_ENABLED.store(enabled, Ordering::Release);
@@ -359,54 +604,244 @@ pub fn telemetry_enabled() -> bool {
 }
 
 pub fn async_capture_event(app: &AppHandle, event: PostHogEvent) {
+    if !live_telemetry_enabled(app) {
+        return;
+    }
+
+    let anonymous_id = GeneralSettingsStore::get(app)
+        .ok()
+        .flatten()
+        .map(|settings| settings.instance_id.to_string())
+        .unwrap_or_else(|| {
+            PRODUCT_EVENT_SESSION_ID
+                .get_or_init(Uuid::new_v4)
+                .to_string()
+        });
+    let user_id = AuthStore::get(app)
+        .ok()
+        .flatten()
+        .and_then(|auth| auth.user_id);
+    let process_person_profile = user_id.is_some();
+    let distinct_id = user_id.unwrap_or_else(|| anonymous_id.clone());
+    let mut data = event_data(event);
+    data.set("cap_version", env!("CARGO_PKG_VERSION"));
+    data.set(
+        "cap_backend",
+        match *API_SERVER_IS_CAP_CLOUD
+            .get_or_init(Default::default)
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+        {
+            Some(true) => "cloud",
+            Some(false) => "self_hosted",
+            None => "unknown",
+        },
+    );
+    data.set("os", std::env::consts::OS);
+    data.set("arch", std::env::consts::ARCH);
+
+    if let Some(event) = product_event(&data, anonymous_id) {
+        enqueue_product_event(app, event);
+    }
+
     if option_env!("VITE_POSTHOG_KEY").is_none() {
         return;
     }
 
-    let live_enabled = crate::general_settings::GeneralSettingsStore::get(app)
-        .ok()
-        .flatten()
-        .map(|s| s.enable_telemetry)
-        .unwrap_or_else(telemetry_enabled);
-    TELEMETRY_ENABLED.store(live_enabled, Ordering::Release);
-    if !live_enabled {
-        return;
-    }
-
-    let distinct_id = AuthStore::get(app)
-        .ok()
-        .flatten()
-        .and_then(|auth| auth.user_id);
+    let app = app.clone();
     tokio::spawn(async move {
-        let mut e = posthog_event(event, distinct_id.as_deref());
+        if !live_telemetry_enabled(&app) {
+            return;
+        }
 
-        e.insert_prop("cap_version", env!("CARGO_PKG_VERSION"))
-            .map_err(|err| error!("Error adding PostHog property: {err:?}"))
-            .ok();
-        e.insert_prop(
-            "cap_backend",
-            match *API_SERVER_IS_CAP_CLOUD
-                .get_or_init(Default::default)
-                .read()
-                .unwrap_or_else(PoisonError::into_inner)
-            {
-                Some(true) => "cloud",
-                Some(false) => "self_hosted",
-                None => "unknown",
-            },
-        )
-        .map_err(|err| error!("Error adding PostHog property: {err:?}"))
-        .ok();
-        e.insert_prop("os", std::env::consts::OS)
-            .map_err(|err| error!("Error adding PostHog property: {err:?}"))
-            .ok();
-        e.insert_prop("arch", std::env::consts::ARCH)
-            .map_err(|err| error!("Error adding PostHog property: {err:?}"))
-            .ok();
+        let event = posthog_event(&data, &distinct_id, process_person_profile);
 
-        posthog_rs::capture(e)
+        posthog_rs::capture(event)
             .await
             .map_err(|err| error!("Error sending event to PostHog: {err:?}"))
             .ok();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    fn recording_started() -> PostHogEvent {
+        PostHogEvent::RecordingStarted {
+            mode: "studio",
+            target_kind: "screen",
+            has_camera: true,
+            has_mic: true,
+            has_system_audio: false,
+            target_fps: 60,
+            target_width: 1920,
+            target_height: 1080,
+            fragmented: true,
+            custom_cursor_capture: true,
+        }
+    }
+
+    fn granular_health_event() -> PostHogEvent {
+        PostHogEvent::RecordingDeviceLost {
+            mode: "studio",
+            subsystem: "camera".to_string(),
+        }
+    }
+
+    #[test]
+    fn core_product_event_catalog_is_intentionally_small() {
+        let included = [
+            "recording_started",
+            "recording_completed",
+            "multipart_upload_complete",
+            "multipart_upload_failed",
+            "recording_recovery_failed",
+        ];
+        let excluded = [
+            "recording_recovered",
+            "recording_muxer_crashed",
+            "recording_audio_degraded",
+            "recording_disk_space_low",
+            "recording_disk_space_exhausted",
+            "recording_device_lost",
+            "recording_encoder_rebuilt",
+            "recording_source_audio_reset",
+            "recording_capture_target_lost",
+        ];
+
+        assert!(included.into_iter().all(is_core_product_event));
+        assert!(!excluded.into_iter().any(is_core_product_event));
+    }
+
+    #[test]
+    fn recording_started_has_scalar_properties() {
+        let data = event_data(recording_started());
+
+        assert_eq!(data.name, "recording_started");
+        assert_eq!(data.properties["mode"], "studio");
+        assert_eq!(data.properties["target_fps"], 60);
+        assert_eq!(data.properties["has_camera"], true);
+        assert!(data.properties.values().all(|value| {
+            value.is_null() || value.is_boolean() || value.is_number() || value.is_string()
+        }));
+    }
+
+    #[test]
+    fn product_event_reuses_install_id_and_process_session() {
+        let data = event_data(recording_started());
+        let first = product_event(&data, "install-id".to_string()).unwrap();
+        let second = product_event(&data, "install-id".to_string()).unwrap();
+
+        assert_eq!(first.anonymous_id, "install-id");
+        assert_eq!(second.anonymous_id, "install-id");
+        assert_eq!(first.session_id, second.session_id);
+        assert_ne!(first.event_id, second.event_id);
+        assert_eq!(first.platform, "desktop");
+    }
+
+    #[test]
+    fn stable_anonymous_posthog_event_remains_personless() {
+        let data = event_data(recording_started());
+        let event = posthog_event(&data, "install-id", false);
+        let json = serde_json::to_value(event).unwrap();
+
+        assert_eq!(json["$distinct_id"], "install-id");
+        assert_eq!(json["properties"]["$process_person_profile"], false);
+    }
+
+    #[test]
+    fn granular_health_event_stays_out_of_product_analytics() {
+        let data = event_data(granular_health_event());
+
+        assert!(product_event(&data, "install-id".to_string()).is_none());
+    }
+
+    #[test]
+    fn product_events_remove_raw_error_details_before_networking() {
+        let data = event_data(PostHogEvent::MultipartUploadFailed {
+            duration: Duration::from_secs(2),
+            error: "/Users/private/recording.cap failed".to_string(),
+        });
+        let event = product_event(&data, "install-id".to_string()).unwrap();
+
+        assert!(!event.properties.contains_key("error"));
+        assert_eq!(event.properties["duration"], 2);
+    }
+
+    #[test]
+    fn truncation_is_safe_for_multibyte_text() {
+        let value = "🙂".repeat(100);
+        let truncated = truncate_reason(value);
+
+        assert!(truncated.ends_with('…'));
+        assert!(truncated.len() <= 243);
+        assert!(truncated.is_char_boundary(truncated.len()));
+    }
+
+    #[test]
+    fn batch_contract_uses_expected_camel_case_fields() {
+        let data = event_data(recording_started());
+        let event = product_event(&data, "install-id".to_string()).unwrap();
+        let json = serde_json::to_value(ProductEventBatch { events: &[event] }).unwrap();
+        let serialized = &json["events"][0];
+
+        assert!(serialized.get("eventId").is_some());
+        assert_eq!(serialized["eventName"], "recording_started");
+        assert_eq!(serialized["anonymousId"], "install-id");
+        assert_eq!(serialized["platform"], "desktop");
+        assert!(serialized.get("occurredAt").is_some());
+        assert!(serialized.get("sessionId").is_some());
+        assert!(serialized.get("appVersion").is_some());
+    }
+
+    #[tokio::test]
+    async fn retry_once_stops_after_success() {
+        let attempts = AtomicUsize::new(0);
+
+        let result = retry_once(
+            || {
+                let attempt = attempts.fetch_add(1, Ordering::Relaxed);
+                async move {
+                    if attempt == 0 {
+                        Err("temporary")
+                    } else {
+                        Ok(())
+                    }
+                }
+            },
+            Duration::ZERO,
+        )
+        .await;
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(attempts.load(Ordering::Relaxed), 2);
+    }
+
+    #[tokio::test]
+    async fn retry_once_never_attempts_more_than_twice() {
+        let attempts = AtomicUsize::new(0);
+
+        let result = retry_once(
+            || {
+                attempts.fetch_add(1, Ordering::Relaxed);
+                async { Err::<(), _>("offline") }
+            },
+            Duration::ZERO,
+        )
+        .await;
+
+        assert_eq!(result, Err("offline"));
+        assert_eq!(attempts.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn product_status_retry_policy_matches_the_browser() {
+        assert!(!should_retry_product_status(400));
+        assert!(!should_retry_product_status(401));
+        assert!(should_retry_product_status(429));
+        assert!(should_retry_product_status(503));
+    }
 }

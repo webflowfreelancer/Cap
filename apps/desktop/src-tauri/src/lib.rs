@@ -5184,6 +5184,7 @@ pub async fn run(recording_logging_handle: LoggingHandle, logs_dir: PathBuf) {
             specta_builder.mount_events(&app);
             hotkeys::init(&app);
             general_settings::init(&app);
+            posthog::init_product_session(&app);
             configure_camera_blur_recovery(&app, previous_termination);
             fake_window::init(&app);
             app.manage(target_select_overlay::WindowFocusManager::default());
