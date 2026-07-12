@@ -132,6 +132,10 @@ test("health queries use stable hourly aggregates and a bounded window", () => {
 	);
 	assert.match(contents, /error\('start_time is required'\)/);
 	assert.match(contents, /error\('end_time is required'\)/);
+	assert.match(
+		contents,
+		/toStartOfHour\(toDateTime64\(\{\{DateTime64\(start_time\)\}\}, 3\)\)/,
+	);
 	assert.match(contents, /FROM product_events_health_hourly/);
 	assert.match(contents, /uniqMerge\(unique_events\)/);
 	assert.match(contents, /INTERVAL 31 DAY/);
