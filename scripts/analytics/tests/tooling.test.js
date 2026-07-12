@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
 	assertSafeStep,
+	COMPOSE_FILE,
 	cloudEnvironment,
 	LOCAL_ENV_FILE,
 	localEnvironment,
@@ -82,6 +83,12 @@ test("local setup builds, tests and writes its deterministic environment", () =>
 	assert.match(
 		first.PRODUCT_ANALYTICS_TINYBIRD_TOKEN,
 		/^p\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/,
+	);
+	const compose = fs.readFileSync(COMPOSE_FILE, "utf8");
+	assert.match(compose, /working_dir: \/workspace\/tinybird/);
+	assert.match(
+		compose,
+		/tinybird:\/workspace\/tinybird:ro[\s\S]*tinybird-local-workspace\.json:\/workspace\/\.tinyb:ro/,
 	);
 });
 

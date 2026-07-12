@@ -82,7 +82,7 @@ services:
     depends_on:
       - tinybird-local
     network_mode: "service:tinybird-local"
-    working_dir: /workspace
+    working_dir: /workspace/tinybird
     entrypoint: ["tb"]
     environment:
       TB_LOCAL: "1"
@@ -93,7 +93,7 @@ services:
       PRODUCT_ANALYTICS_TINYBIRD_HOST: http://127.0.0.1:7181
       PRODUCT_ANALYTICS_TINYBIRD_TOKEN: ${TB_LOCAL_WORKSPACE_TOKEN:-}
     volumes:
-      - ../../scripts/analytics/tinybird:/workspace:ro
+      - ../../scripts/analytics/tinybird:/workspace/tinybird:ro
       - ../../scripts/analytics/tinybird-local-workspace.json:/workspace/.tinyb:ro
 
   tinybird-cloud-cli:
