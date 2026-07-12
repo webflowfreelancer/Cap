@@ -109,7 +109,11 @@ test("daily product queries stay on the pre-aggregated datasource", () => {
 
 test("daily materialization counts deterministic event IDs", () => {
 	const contents = fs.readFileSync(
-		path.join(TINYBIRD_PROJECT_DIR, "pipes", "product_events_daily_mv.pipe"),
+		path.join(
+			TINYBIRD_PROJECT_DIR,
+			"pipes",
+			"materialize_product_events_daily.pipe",
+		),
 		"utf8",
 	);
 	assert.match(contents, /uniqState\(event_id\) AS events/);

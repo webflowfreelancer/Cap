@@ -247,6 +247,14 @@ const validateAnalyticsProject = (projectDir = TINYBIRD_PROJECT_DIR) => {
 	}
 
 	const project = loadTinybirdProject(projectDir);
+	const datasourceNames = new Set(
+		project.datasources.map((datasource) => datasource.name),
+	);
+	for (const pipe of project.pipes) {
+		if (datasourceNames.has(pipe.name)) {
+			issues.push(`Tinybird resource name ${pipe.name} is not unique`);
+		}
+	}
 	for (const name of [
 		"analytics_events",
 		"analytics_pages_mv",
@@ -305,7 +313,7 @@ const validateAnalyticsProject = (projectDir = TINYBIRD_PROJECT_DIR) => {
 		issues.push("Missing product_events_health_hourly aggregate datasource");
 	}
 	for (const name of [
-		"product_events_daily_mv",
+		"materialize_product_events_daily",
 		"product_events_health_hourly_mv",
 		"product_events_daily",
 		"product_events_health",
@@ -316,7 +324,7 @@ const validateAnalyticsProject = (projectDir = TINYBIRD_PROJECT_DIR) => {
 			continue;
 		}
 		if (
-			!name.endsWith("_mv") &&
+			pipe.type !== "materialized" &&
 			!hasToken(pipe, "product_events_agent_read", "READ")
 		) {
 			issues.push(`${name} is missing its read-only agent token`);

@@ -188,6 +188,25 @@ test("fixture validation catches duplicate event IDs", () => {
 	}
 });
 
+test("project validation rejects duplicate Tinybird resource names", () => {
+	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cap-analytics-"));
+	const projectDir = path.join(tempRoot, "tinybird");
+	try {
+		fs.cpSync(TINYBIRD_PROJECT_DIR, projectDir, { recursive: true });
+		fs.copyFileSync(
+			path.join(projectDir, "pipes", "materialize_product_events_daily.pipe"),
+			path.join(projectDir, "pipes", "product_events_daily_mv.pipe"),
+		);
+		assert.ok(
+			validateAnalyticsProject(projectDir).some((issue) =>
+				issue.includes("resource name product_events_daily_mv is not unique"),
+			),
+		);
+	} finally {
+		fs.rmSync(tempRoot, { force: true, recursive: true });
+	}
+});
+
 test("unknown analytics commands fail before executing anything", () => {
 	assert.throws(() => operationPlan("unknown"), /Unknown analytics command/);
 });

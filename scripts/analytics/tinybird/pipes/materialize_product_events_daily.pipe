@@ -1,7 +1,7 @@
 DESCRIPTION >
 	Materialized daily product event aggregates with retry-safe unique counts.
 
-NODE product_events_daily_mv_node
+NODE materialize_product_events_daily_node
 SQL >
 	SELECT
 		toDate(occurred_at) AS date,
