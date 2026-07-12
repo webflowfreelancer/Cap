@@ -19,7 +19,7 @@ interface ProductAnalyticsRateLimiterOptions {
 	maxKeys?: number;
 }
 
-const ALLOWED_FETCH_SITES = new Set(["none", "same-origin", "same-site"]);
+const ALLOWED_FETCH_SITES = new Set(["same-origin", "same-site"]);
 
 export class ProductAnalyticsRateLimiter {
 	private readonly buckets = new Map<
@@ -78,8 +78,8 @@ export function isTrustedAnalyticsRequest(
 	if (!hasValidContentLength(headers.contentLength)) return false;
 
 	const secFetchSite = headers.secFetchSite?.toLowerCase();
-	if (secFetchSite && !ALLOWED_FETCH_SITES.has(secFetchSite)) return false;
 	if (!headers.origin || !allowedOrigins.includes(headers.origin)) return false;
+	if (!secFetchSite || !ALLOWED_FETCH_SITES.has(secFetchSite)) return false;
 
 	return true;
 }
@@ -87,7 +87,6 @@ export function isTrustedAnalyticsRequest(
 export function isAuthenticatedAnalyticsRequestCandidate(
 	headers: AnalyticsRequestHeaders,
 ) {
-	if (headers.origin || headers.secFetchSite) return false;
 	if (!hasValidContentLength(headers.contentLength)) return false;
 	const token = headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
 	return token?.length === 36;

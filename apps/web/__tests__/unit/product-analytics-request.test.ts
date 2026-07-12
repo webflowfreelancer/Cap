@@ -30,7 +30,6 @@ describe("isTrustedAnalyticsRequest", () => {
 			"same-site browser",
 			{ origin: "https://cap.so", secFetchSite: "same-site" },
 		],
-		["Tauri", { origin: "tauri://localhost" }],
 	])("accepts %s", (_label, headers) => {
 		expect(isTrustedAnalyticsRequest(headers, allowedOrigins)).toBe(true);
 	});
@@ -47,11 +46,17 @@ describe("isTrustedAnalyticsRequest", () => {
 	it("rejects requests without browser metadata", () => {
 		expect(isTrustedAnalyticsRequest({}, allowedOrigins)).toBe(false);
 		expect(
-			isTrustedAnalyticsRequest({ secFetchSite: "none" }, allowedOrigins),
+			isTrustedAnalyticsRequest({ origin: "https://cap.so" }, allowedOrigins),
+		).toBe(false);
+		expect(
+			isTrustedAnalyticsRequest(
+				{ origin: "https://cap.so", secFetchSite: "none" },
+				allowedOrigins,
+			),
 		).toBe(false);
 	});
 
-	it("allows only headerless API-key requests to attempt actor resolution", () => {
+	it("allows API-key requests to attempt actor resolution", () => {
 		expect(
 			isAuthenticatedAnalyticsRequestCandidate({
 				authorization: `Bearer ${"a".repeat(36)}`,
@@ -67,7 +72,7 @@ describe("isTrustedAnalyticsRequest", () => {
 				authorization: `Bearer ${"a".repeat(36)}`,
 				origin: "https://attacker.example",
 			}),
-		).toBe(false);
+		).toBe(true);
 	});
 
 	it("rejects oversized declared bodies", () => {
