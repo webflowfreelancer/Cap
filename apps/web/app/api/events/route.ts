@@ -2,6 +2,7 @@ import {
 	createProductEventRows,
 	PRODUCT_ANALYTICS_LIMITS,
 } from "@cap/analytics";
+import { serverEnv } from "@cap/env";
 import {
 	ProductAnalytics,
 	resolveProductAnalyticsActor,
@@ -16,6 +17,10 @@ import {
 	HttpServerRequest,
 } from "@effect/platform";
 import { Effect, Layer, Schema } from "effect";
+import {
+	readProductAnalyticsBrowserToken,
+	verifyProductAnalyticsBrowserToken,
+} from "@/lib/analytics/browser-token";
 import {
 	getProductAnalyticsRateLimitKey,
 	isAuthenticatedAnalyticsRequestCandidate,
@@ -55,6 +60,7 @@ class Api extends HttpApi.make("ProductAnalyticsApi").add(
 const RequestHeaders = Schema.Struct({
 	authorization: Schema.optional(Schema.String),
 	"content-length": Schema.optional(Schema.String),
+	cookie: Schema.optional(Schema.String),
 	"sec-fetch-site": Schema.optional(Schema.String),
 	origin: Schema.optional(Schema.String),
 	"x-vercel-ip-country": Schema.optional(Schema.String),
@@ -82,10 +88,12 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
 							origin: headers.origin,
 							secFetchSite: headers["sec-fetch-site"],
 						};
-						const isBrowserRequest = isTrustedAnalyticsRequest(
-							requestMetadata,
-							allowedOrigins,
-						);
+						const isBrowserRequest =
+							isTrustedAnalyticsRequest(requestMetadata, allowedOrigins) &&
+							verifyProductAnalyticsBrowserToken(
+								readProductAnalyticsBrowserToken(headers.cookie),
+								serverEnv().NEXTAUTH_SECRET,
+							);
 						if (
 							!isBrowserRequest &&
 							!isAuthenticatedAnalyticsRequestCandidate(requestMetadata)

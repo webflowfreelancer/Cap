@@ -4,6 +4,12 @@ import { buildEnv, serverEnv } from "@cap/env";
 import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { type NextRequest, NextResponse, userAgent } from "next/server";
+import {
+	createProductAnalyticsBrowserToken,
+	PRODUCT_ANALYTICS_BROWSER_TOKEN_COOKIE,
+	PRODUCT_ANALYTICS_BROWSER_TOKEN_TTL_SECONDS,
+	verifyProductAnalyticsBrowserToken,
+} from "@/lib/analytics/browser-token";
 
 const addHttps = (s?: string) => {
 	if (!s) return s;
@@ -20,6 +26,30 @@ const mainOrigins = [
 	addHttps(serverEnv().VERCEL_PROJECT_PRODUCTION_URL_HOST),
 ].filter(Boolean) as string[];
 
+const nextWithAnalyticsToken = (
+	request: NextRequest,
+	response = NextResponse.next(),
+) => {
+	const secret = serverEnv().NEXTAUTH_SECRET;
+	const token = request.cookies.get(
+		PRODUCT_ANALYTICS_BROWSER_TOKEN_COOKIE,
+	)?.value;
+	if (!verifyProductAnalyticsBrowserToken(token, secret)) {
+		response.cookies.set(
+			PRODUCT_ANALYTICS_BROWSER_TOKEN_COOKIE,
+			createProductAnalyticsBrowserToken(secret),
+			{
+				httpOnly: true,
+				maxAge: PRODUCT_ANALYTICS_BROWSER_TOKEN_TTL_SECONDS,
+				path: "/",
+				sameSite: "strict",
+				secure: process.env.NODE_ENV === "production",
+			},
+		);
+	}
+	return response;
+};
+
 export async function proxy(request: NextRequest) {
 	const url = new URL(request.url);
 	const path = url.pathname;
@@ -29,7 +59,7 @@ export async function proxy(request: NextRequest) {
 	}
 
 	if (path.startsWith("/login")) {
-		const response = NextResponse.next();
+		const response = nextWithAnalyticsToken(request);
 		response.headers.set("X-Frame-Options", "SAMEORIGIN");
 		response.headers.set(
 			"Content-Security-Policy",
@@ -62,11 +92,11 @@ export async function proxy(request: NextRequest) {
 			process.env.NODE_ENV !== "development"
 		)
 			return NextResponse.redirect(new URL("/login", url.origin));
-		else return NextResponse.next();
+		else return nextWithAnalyticsToken(request);
 	}
 
 	if (mainOrigins.some((d) => url.origin.startsWith(d))) {
-		return NextResponse.next();
+		return nextWithAnalyticsToken(request);
 	}
 
 	const webUrl = new URL(serverEnv().WEB_URL).hostname;
@@ -79,7 +109,8 @@ export async function proxy(request: NextRequest) {
 		}
 
 		const verifiedDomain = request.cookies.get("verified_domain");
-		if (verifiedDomain?.value === hostname) return NextResponse.next();
+		if (verifiedDomain?.value === hostname)
+			return nextWithAnalyticsToken(request);
 
 		const [organization] = await db()
 			.select()
@@ -109,7 +140,7 @@ export async function proxy(request: NextRequest) {
 		response.headers.set("x-referrer", referrer);
 		response.headers.set("x-user-agent", JSON.stringify(ua));
 
-		return response;
+		return nextWithAnalyticsToken(request, response);
 	} catch (error) {
 		console.error("Error in proxy:", error);
 		return notFound();
