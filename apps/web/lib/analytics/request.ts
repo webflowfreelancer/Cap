@@ -79,8 +79,7 @@ export function isTrustedAnalyticsRequest(
 
 	const secFetchSite = headers.secFetchSite?.toLowerCase();
 	if (secFetchSite && !ALLOWED_FETCH_SITES.has(secFetchSite)) return false;
-	if (!headers.origin && !secFetchSite) return false;
-	if (headers.origin && !allowedOrigins.includes(headers.origin)) return false;
+	if (!headers.origin || !allowedOrigins.includes(headers.origin)) return false;
 
 	return true;
 }

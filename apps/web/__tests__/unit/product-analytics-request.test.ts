@@ -46,6 +46,9 @@ describe("isTrustedAnalyticsRequest", () => {
 
 	it("rejects requests without browser metadata", () => {
 		expect(isTrustedAnalyticsRequest({}, allowedOrigins)).toBe(false);
+		expect(
+			isTrustedAnalyticsRequest({ secFetchSite: "none" }, allowedOrigins),
+		).toBe(false);
 	});
 
 	it("allows only headerless API-key requests to attempt actor resolution", () => {
