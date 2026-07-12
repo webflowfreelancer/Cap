@@ -6,6 +6,7 @@ import {
 } from "@cap/analytics";
 
 interface AnalyticsRequestHeaders {
+	authorization?: string;
 	contentLength?: string;
 	origin?: string;
 	secFetchSite?: string;
@@ -74,25 +75,33 @@ export function isTrustedAnalyticsRequest(
 	headers: AnalyticsRequestHeaders,
 	allowedOrigins: readonly string[],
 ) {
-	if (headers.contentLength) {
-		const contentLength = Number(headers.contentLength);
-		if (
-			!Number.isSafeInteger(contentLength) ||
-			contentLength < 0 ||
-			contentLength > PRODUCT_ANALYTICS_LIMITS.requestBytes
-		) {
-			return false;
-		}
-	}
+	if (!hasValidContentLength(headers.contentLength)) return false;
 
-	if (
-		headers.secFetchSite &&
-		!ALLOWED_FETCH_SITES.has(headers.secFetchSite.toLowerCase())
-	) {
-		return false;
-	}
+	const secFetchSite = headers.secFetchSite?.toLowerCase();
+	if (secFetchSite && !ALLOWED_FETCH_SITES.has(secFetchSite)) return false;
+	if (!headers.origin && !secFetchSite) return false;
+	if (headers.origin && !allowedOrigins.includes(headers.origin)) return false;
 
-	return !headers.origin || allowedOrigins.includes(headers.origin);
+	return true;
+}
+
+export function isAuthenticatedAnalyticsRequestCandidate(
+	headers: AnalyticsRequestHeaders,
+) {
+	if (headers.origin || headers.secFetchSite) return false;
+	if (!hasValidContentLength(headers.contentLength)) return false;
+	const token = headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+	return token?.length === 36;
+}
+
+function hasValidContentLength(value?: string) {
+	if (!value) return true;
+	const contentLength = Number(value);
+	return (
+		Number.isSafeInteger(contentLength) &&
+		contentLength >= 0 &&
+		contentLength <= PRODUCT_ANALYTICS_LIMITS.requestBytes
+	);
 }
 
 export function normalizeProductEventBatch(
@@ -123,13 +132,12 @@ export function normalizeProductEventBatch(
 }
 
 export function getProductAnalyticsRateLimitKey(headers: {
-	xForwardedFor?: string;
-	xRealIp?: string;
+	trustedVercelProxy: boolean;
+	xVercelForwardedFor?: string;
 }) {
+	if (!headers.trustedVercelProxy) return "self-hosted";
 	return (
-		headers.xRealIp?.trim() ||
-		headers.xForwardedFor?.split(",")[0]?.trim() ||
-		"unknown"
+		headers.xVercelForwardedFor?.split(",")[0]?.trim() || "vercel-unknown"
 	).slice(0, PRODUCT_ANALYTICS_LIMITS.identifierLength);
 }
 

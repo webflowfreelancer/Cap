@@ -18,6 +18,7 @@ import {
 import { Effect, Layer, Schema } from "effect";
 import {
 	getProductAnalyticsRateLimitKey,
+	isAuthenticatedAnalyticsRequestCandidate,
 	isTrustedAnalyticsRequest,
 	normalizeGeoHeader,
 	normalizeProductEventBatch,
@@ -52,14 +53,14 @@ class Api extends HttpApi.make("ProductAnalyticsApi").add(
 ) {}
 
 const RequestHeaders = Schema.Struct({
+	authorization: Schema.optional(Schema.String),
 	"content-length": Schema.optional(Schema.String),
 	"sec-fetch-site": Schema.optional(Schema.String),
 	origin: Schema.optional(Schema.String),
 	"x-vercel-ip-country": Schema.optional(Schema.String),
 	"x-vercel-ip-country-region": Schema.optional(Schema.String),
 	"x-vercel-ip-city": Schema.optional(Schema.String),
-	"x-forwarded-for": Schema.optional(Schema.String),
-	"x-real-ip": Schema.optional(Schema.String),
+	"x-vercel-forwarded-for": Schema.optional(Schema.String),
 });
 
 const fallbackRateLimiter = new ProductAnalyticsRateLimiter();
@@ -75,15 +76,19 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
 						const headers = yield* HttpServerRequest.schemaHeaders(
 							RequestHeaders,
 						).pipe(Effect.mapError(() => new HttpApiError.BadRequest()));
+						const requestMetadata = {
+							authorization: headers.authorization,
+							contentLength: headers["content-length"],
+							origin: headers.origin,
+							secFetchSite: headers["sec-fetch-site"],
+						};
+						const isBrowserRequest = isTrustedAnalyticsRequest(
+							requestMetadata,
+							allowedOrigins,
+						);
 						if (
-							!isTrustedAnalyticsRequest(
-								{
-									contentLength: headers["content-length"],
-									origin: headers.origin,
-									secFetchSite: headers["sec-fetch-site"],
-								},
-								allowedOrigins,
-							)
+							!isBrowserRequest &&
+							!isAuthenticatedAnalyticsRequestCandidate(requestMetadata)
 						) {
 							return yield* Effect.fail(new HttpApiError.BadRequest());
 						}
@@ -91,8 +96,8 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
 						if (
 							fallbackRateLimiter.isRateLimited(
 								getProductAnalyticsRateLimitKey({
-									xForwardedFor: headers["x-forwarded-for"],
-									xRealIp: headers["x-real-ip"],
+									trustedVercelProxy: process.env.VERCEL === "1",
+									xVercelForwardedFor: headers["x-vercel-forwarded-for"],
 								}),
 							)
 						) {
@@ -113,6 +118,9 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
 						}
 
 						const actor = yield* resolveProductAnalyticsActor;
+						if (!isBrowserRequest && !actor) {
+							return yield* Effect.fail(new HttpApiError.BadRequest());
+						}
 						const rows = createProductEventRows(events, {
 							receivedAt: new Date().toISOString(),
 							source: "client",

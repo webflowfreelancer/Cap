@@ -194,16 +194,25 @@ describe("ProductAnalyticsQueue", () => {
 
 describe("browser analytics identity", () => {
 	it("falls back when secure UUID generation is unavailable", () => {
-		expect(createProductEventId(null, 1_000, 0.5)).toBe("fallback-rs-i");
+		const randomValues = (values: Uint32Array) => {
+			values.set([123, 456]);
+			return values;
+		};
+		expect(createProductEventId(null, 1_000, randomValues)).toBe(
+			"fallback-rs-3f-co",
+		);
 		expect(
 			createProductEventId(
 				() => {
 					throw new Error("blocked");
 				},
 				1_000,
-				0.5,
+				randomValues,
 			),
-		).toBe("fallback-rs-i");
+		).toBe("fallback-rs-3f-co");
+		expect(createProductEventId(null, 1_000, null)).toMatch(
+			/^fallback-rs-counter-[a-z0-9]+$/,
+		);
 	});
 
 	it("reuses a persisted identifier", () => {

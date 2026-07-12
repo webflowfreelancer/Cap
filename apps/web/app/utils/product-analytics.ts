@@ -164,6 +164,7 @@ let browserQueue: ProductAnalyticsQueue | undefined;
 let anonymousId: string | undefined;
 let sessionId: string | undefined;
 let listenersRegistered = false;
+let fallbackEventIdCounter = 0;
 
 export function captureProductEvent(
 	eventName: string,
@@ -224,13 +225,24 @@ export function getOrCreateStorageId(
 export function createProductEventId(
 	randomUUID: (() => string) | null = getRandomUUID() ?? null,
 	now = Date.now(),
-	random = Math.random(),
+	randomValues:
+		| ((values: Uint32Array) => Uint32Array)
+		| null = getRandomValues() ?? null,
 ) {
 	try {
 		const id = randomUUID?.();
 		if (id) return id;
 	} catch {}
-	return `fallback-${now.toString(36)}-${random.toString(36).slice(2)}`;
+
+	try {
+		if (randomValues) {
+			const values = randomValues(new Uint32Array(2));
+			return `fallback-${now.toString(36)}-${values[0]?.toString(36)}-${values[1]?.toString(36)}`;
+		}
+	} catch {}
+
+	fallbackEventIdCounter += 1;
+	return `fallback-${now.toString(36)}-counter-${fallbackEventIdCounter.toString(36)}`;
 }
 
 export function readFirstTouchAttribution(
@@ -316,6 +328,15 @@ function getBrowserStorage(name: "localStorage" | "sessionStorage") {
 function getRandomUUID() {
 	try {
 		return globalThis.crypto?.randomUUID?.bind(globalThis.crypto);
+	} catch {
+		return undefined;
+	}
+}
+
+function getRandomValues() {
+	try {
+		if (!globalThis.crypto?.getRandomValues) return undefined;
+		return (values: Uint32Array) => globalThis.crypto.getRandomValues(values);
 	} catch {
 		return undefined;
 	}

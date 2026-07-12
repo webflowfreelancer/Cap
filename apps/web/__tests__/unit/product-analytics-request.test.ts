@@ -2,6 +2,7 @@ import { PRODUCT_ANALYTICS_LIMITS } from "@cap/analytics";
 import { describe, expect, it } from "vitest";
 import {
 	getProductAnalyticsRateLimitKey,
+	isAuthenticatedAnalyticsRequestCandidate,
 	isTrustedAnalyticsRequest,
 	normalizeGeoHeader,
 	normalizeProductEventBatch,
@@ -30,7 +31,6 @@ describe("isTrustedAnalyticsRequest", () => {
 			{ origin: "https://cap.so", secFetchSite: "same-site" },
 		],
 		["Tauri", { origin: "tauri://localhost" }],
-		["server client", {}],
 	])("accepts %s", (_label, headers) => {
 		expect(isTrustedAnalyticsRequest(headers, allowedOrigins)).toBe(true);
 	});
@@ -41,6 +41,29 @@ describe("isTrustedAnalyticsRequest", () => {
 				{ origin: "https://attacker.example", secFetchSite: "cross-site" },
 				allowedOrigins,
 			),
+		).toBe(false);
+	});
+
+	it("rejects requests without browser metadata", () => {
+		expect(isTrustedAnalyticsRequest({}, allowedOrigins)).toBe(false);
+	});
+
+	it("allows only headerless API-key requests to attempt actor resolution", () => {
+		expect(
+			isAuthenticatedAnalyticsRequestCandidate({
+				authorization: `Bearer ${"a".repeat(36)}`,
+			}),
+		).toBe(true);
+		expect(
+			isAuthenticatedAnalyticsRequestCandidate({
+				authorization: "Bearer invalid",
+			}),
+		).toBe(false);
+		expect(
+			isAuthenticatedAnalyticsRequestCandidate({
+				authorization: `Bearer ${"a".repeat(36)}`,
+				origin: "https://attacker.example",
+			}),
 		).toBe(false);
 	});
 
@@ -136,13 +159,22 @@ describe("ProductAnalyticsRateLimiter", () => {
 		expect(limiter.isRateLimited("a", 1_000)).toBe(false);
 	});
 
-	it("uses a bounded request identity", () => {
+	it("uses only a platform-owned Vercel request identity", () => {
 		expect(
 			getProductAnalyticsRateLimitKey({
-				xForwardedFor: "203.0.113.10, 10.0.0.1",
+				trustedVercelProxy: true,
+				xVercelForwardedFor: "203.0.113.10, 10.0.0.1",
 			}),
 		).toBe("203.0.113.10");
-		expect(getProductAnalyticsRateLimitKey({})).toBe("unknown");
+		expect(
+			getProductAnalyticsRateLimitKey({
+				trustedVercelProxy: false,
+				xVercelForwardedFor: "attacker-controlled",
+			}),
+		).toBe("self-hosted");
+		expect(getProductAnalyticsRateLimitKey({ trustedVercelProxy: true })).toBe(
+			"vercel-unknown",
+		);
 	});
 });
 
