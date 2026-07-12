@@ -25,8 +25,7 @@ const TEST_FILES = fs
 const CLOUD_URL_DEFAULT = "https://api.tinybird.co";
 const WORKSPACE_ID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const WORKSPACE_ID_SEARCH_PATTERN =
-	/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi;
+const LOCAL_TOKEN_SIGNING_KEY = "tinybird-local";
 const LOCAL_IDENTIFIERS = {
 	workspaceId: "00000000-0000-4000-8000-000000000001",
 	workspaceTokenId: "00000000-0000-4000-8000-000000000002",
@@ -373,7 +372,7 @@ const cloudEnvironment = (env = process.env) => {
 const encodeLocalToken = (userId, tokenId) => {
 	const payload = `{"u": "${userId}", "id": "${tokenId}", "host": null}`;
 	const encodedPayload = Buffer.from(payload).toString("base64url");
-	const signature = createHmac("sha256", "abcd")
+	const signature = createHmac("sha256", LOCAL_TOKEN_SIGNING_KEY)
 		.update(encodedPayload)
 		.digest("base64url");
 	return `p.${encodedPayload}.${signature}`;
@@ -433,18 +432,34 @@ const runProcessCapture = (command, args, options = {}) => {
 	if (result.error || result.status !== 0) {
 		throw new Error("Unable to verify Tinybird workspace identity.");
 	}
-	return `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+	return result.stdout ?? "";
 };
 
 const verifyCloudWorkspace = (env = process.env, run = runProcessCapture) => {
 	const environment = cloudEnvironment(env);
-	const step = cloudCliStep("--cloud", "workspace", "current");
+	const step = cloudCliStep(
+		"--cloud",
+		"--output",
+		"json",
+		"workspace",
+		"current",
+	);
 	assertSafeStep(step);
 	const output = run(step.command, step.args, { env: environment });
-	const workspaceIds = (output.match(WORKSPACE_ID_SEARCH_PATTERN) ?? []).map(
-		(workspaceId) => workspaceId.toLowerCase(),
-	);
-	if (!workspaceIds.includes(environment.TINYBIRD_WORKSPACE_ID.toLowerCase())) {
+	let workspace;
+	try {
+		workspace = JSON.parse(output);
+	} catch {
+		throw new Error("Unable to parse Tinybird workspace identity.");
+	}
+	if (
+		!workspace ||
+		typeof workspace !== "object" ||
+		Array.isArray(workspace) ||
+		typeof workspace.id !== "string" ||
+		workspace.id.toLowerCase() !==
+			environment.TINYBIRD_WORKSPACE_ID.toLowerCase()
+	) {
 		throw new Error(
 			"Tinybird deploy token does not target TINYBIRD_WORKSPACE_ID.",
 		);

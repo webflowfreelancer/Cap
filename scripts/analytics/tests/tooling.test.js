@@ -136,16 +136,32 @@ test("cloud deploy verifies the token workspace before mutation", () => {
 		TINYBIRD_WORKSPACE_ID: workspaceId,
 	};
 	assert.equal(
-		verifyCloudWorkspace(env, () => `| production | ${workspaceId} | admin |`),
+		verifyCloudWorkspace(env, (_command, args) => {
+			assert.deepEqual(args.slice(-5), [
+				"--cloud",
+				"--output",
+				"json",
+				"workspace",
+				"current",
+			]);
+			return JSON.stringify({ id: workspaceId, name: "production" });
+		}),
 		workspaceId,
 	);
 	assert.throws(
 		() =>
-			verifyCloudWorkspace(
-				env,
-				() => "| staging | 87654321-4321-4321-8321-cba987654321 | admin |",
+			verifyCloudWorkspace(env, () =>
+				JSON.stringify({
+					id: "87654321-4321-4321-8321-cba987654321",
+					metadata: workspaceId,
+					name: "staging",
+				}),
 			),
 		/does not target/,
+	);
+	assert.throws(
+		() => verifyCloudWorkspace(env, () => "warning: invalid token"),
+		/Unable to parse/,
 	);
 });
 
