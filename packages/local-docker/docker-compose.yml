@@ -65,6 +65,7 @@ services:
     profiles: ["analytics"]
     container_name: cap-tinybird-local
     image: tinybirdco/tinybird-local@sha256:fd4284d2f1ad6a448823e5bc6414267848da964823dc9f98670793bb88031e4d
+    platform: linux/amd64
     restart: unless-stopped
     environment:
       TB_LOCAL_USER_TOKEN: ${TB_LOCAL_USER_TOKEN:-}

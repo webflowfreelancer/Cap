@@ -10,6 +10,7 @@ import { loadTinybirdProject } from "./datafiles.js";
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(MODULE_DIR, "..", "..");
 const TINYBIRD_PROJECT_DIR = path.join(MODULE_DIR, "tinybird");
+const LOCAL_ENV_FILE = path.join(PROJECT_ROOT, ".env.analytics.local");
 const COMPOSE_FILE = path.join(
 	PROJECT_ROOT,
 	"packages",
@@ -22,6 +23,10 @@ const TEST_FILES = fs
 	.sort()
 	.map((fileName) => path.join(MODULE_DIR, "tests", fileName));
 const CLOUD_URL_DEFAULT = "https://api.tinybird.co";
+const WORKSPACE_ID_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const WORKSPACE_ID_SEARCH_PATTERN =
+	/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi;
 const LOCAL_IDENTIFIERS = {
 	workspaceId: "00000000-0000-4000-8000-000000000001",
 	workspaceTokenId: "00000000-0000-4000-8000-000000000002",
@@ -95,26 +100,38 @@ const operationPlan = (operation) => {
 			{ command: "docker", args: composeArgs("config", "--quiet") },
 			{
 				command: "docker",
-				args: composeArgs("up", "-d", "tinybird-local"),
+				args: composeArgs(
+					"up",
+					"-d",
+					"--wait",
+					"--wait-timeout",
+					"60",
+					"tinybird-local",
+				),
 				localAuth: true,
 			},
-			{ type: "wait-local" },
 			localCliStep("--local", "build"),
 			localCliStep("--local", "test", "run"),
-			{ type: "print-local-env" },
+			{ type: "write-local-env" },
 		],
 		"local-test": [
 			{ type: "validate" },
 			{ command: "docker", args: composeArgs("config", "--quiet") },
 			{
 				command: "docker",
-				args: composeArgs("up", "-d", "tinybird-local"),
+				args: composeArgs(
+					"up",
+					"-d",
+					"--wait",
+					"--wait-timeout",
+					"60",
+					"tinybird-local",
+				),
 				localAuth: true,
 			},
-			{ type: "wait-local" },
 			localCliStep("--local", "test", "run"),
 		],
-		"local-tokens": [{ type: "wait-local" }, { type: "print-local-env" }],
+		"local-tokens": [{ type: "write-local-env" }],
 		"local-stop": [
 			{
 				command: "docker",
@@ -123,10 +140,12 @@ const operationPlan = (operation) => {
 		],
 		"cloud-check": [
 			{ type: "validate" },
+			{ type: "verify-cloud-workspace" },
 			cloudCliStep("--cloud", "deploy", "--check"),
 		],
 		"cloud-deploy": [
 			{ type: "validate" },
+			{ type: "verify-cloud-workspace" },
 			cloudCliStep("--cloud", "deploy", "--check"),
 			cloudCliStep("--cloud", "deploy", "--wait"),
 		],
@@ -323,6 +342,12 @@ const cloudEnvironment = (env = process.env) => {
 			"TINYBIRD_DEPLOY_TOKEN is required and must have WORKSPACE:DEPLOY scope.",
 		);
 	}
+	const workspaceId = env.TINYBIRD_WORKSPACE_ID?.trim();
+	if (!workspaceId || !WORKSPACE_ID_PATTERN.test(workspaceId)) {
+		throw new Error(
+			"TINYBIRD_WORKSPACE_ID must be the production workspace UUID.",
+		);
+	}
 	const host =
 		env.TINYBIRD_URL?.trim() ||
 		env.PRODUCT_ANALYTICS_TINYBIRD_HOST?.trim() ||
@@ -333,6 +358,7 @@ const cloudEnvironment = (env = process.env) => {
 		TINYBIRD_URL: host,
 		TB_TOKEN: token,
 		TB_HOST: host,
+		TINYBIRD_WORKSPACE_ID: workspaceId,
 	};
 };
 
@@ -389,19 +415,49 @@ const runProcess = (command, args, options = {}) => {
 	}
 };
 
-const waitForLocal = async (
-	url = `http://127.0.0.1:${process.env.TINYBIRD_LOCAL_PORT || "7181"}/v0/`,
-	timeoutMs = 60_000,
-) => {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		try {
-			const response = await fetch(url);
-			if (response.status < 500) return;
-		} catch {}
-		await new Promise((resolve) => setTimeout(resolve, 500));
+const runProcessCapture = (command, args, options = {}) => {
+	const result = spawnSync(command, args, {
+		cwd: PROJECT_ROOT,
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "pipe"],
+		...options,
+	});
+	if (result.error || result.status !== 0) {
+		throw new Error("Unable to verify Tinybird workspace identity.");
 	}
-	throw new Error(`Tinybird Local did not become ready within ${timeoutMs}ms.`);
+	return `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+};
+
+const verifyCloudWorkspace = (env = process.env, run = runProcessCapture) => {
+	const environment = cloudEnvironment(env);
+	const step = cloudCliStep("--cloud", "workspace", "current");
+	assertSafeStep(step);
+	const output = run(step.command, step.args, { env: environment });
+	const workspaceIds = (output.match(WORKSPACE_ID_SEARCH_PATTERN) ?? []).map(
+		(workspaceId) => workspaceId.toLowerCase(),
+	);
+	if (!workspaceIds.includes(environment.TINYBIRD_WORKSPACE_ID.toLowerCase())) {
+		throw new Error(
+			"Tinybird deploy token does not target TINYBIRD_WORKSPACE_ID.",
+		);
+	}
+	return environment.TINYBIRD_WORKSPACE_ID;
+};
+
+const writeLocalEnvironmentFile = (
+	filePath = LOCAL_ENV_FILE,
+	environment = localEnvironment(),
+) => {
+	fs.writeFileSync(
+		filePath,
+		[
+			`PRODUCT_ANALYTICS_TINYBIRD_HOST=${environment.PRODUCT_ANALYTICS_TINYBIRD_HOST}`,
+			`PRODUCT_ANALYTICS_TINYBIRD_TOKEN=${environment.PRODUCT_ANALYTICS_TINYBIRD_TOKEN}`,
+			"",
+		].join("\n"),
+		{ mode: 0o600 },
+	);
+	return filePath;
 };
 
 const runAnalyticsCommand = async (operation) => {
@@ -420,17 +476,13 @@ const runAnalyticsCommand = async (operation) => {
 			runProcess(process.execPath, ["--test", ...TEST_FILES]);
 			continue;
 		}
-		if (step.type === "wait-local") {
-			await waitForLocal();
+		if (step.type === "verify-cloud-workspace") {
+			verifyCloudWorkspace();
 			continue;
 		}
-		if (step.type === "print-local-env") {
-			const environment = localEnvironment();
+		if (step.type === "write-local-env") {
 			console.log(
-				`PRODUCT_ANALYTICS_TINYBIRD_HOST=${environment.PRODUCT_ANALYTICS_TINYBIRD_HOST}`,
-			);
-			console.log(
-				`PRODUCT_ANALYTICS_TINYBIRD_TOKEN=${environment.PRODUCT_ANALYTICS_TINYBIRD_TOKEN}`,
+				`Wrote local analytics environment to ${writeLocalEnvironmentFile()}`,
 			);
 			continue;
 		}
@@ -447,6 +499,7 @@ const runAnalyticsCommand = async (operation) => {
 
 export {
 	COMPOSE_FILE,
+	LOCAL_ENV_FILE,
 	PRODUCT_COLUMNS,
 	TINYBIRD_PROJECT_DIR,
 	assertSafeStep,
@@ -456,5 +509,6 @@ export {
 	operationPlan,
 	runAnalyticsCommand,
 	validateAnalyticsProject,
-	waitForLocal,
+	verifyCloudWorkspace,
+	writeLocalEnvironmentFile,
 };

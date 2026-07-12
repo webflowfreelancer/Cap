@@ -6,7 +6,7 @@ Run the complete local analytics setup with:
 pnpm analytics:local
 ```
 
-This starts only the optional Tinybird Local Docker profile, waits for readiness, builds every checked-in datafile, runs the Tinybird fixture suites, and prints the two `PRODUCT_ANALYTICS_TINYBIRD_*` values used by Cap. Re-running the command is safe.
+This starts only the optional Tinybird Local Docker profile, waits for readiness, builds every checked-in datafile, runs the Tinybird fixture suites, and writes the two `PRODUCT_ANALYTICS_TINYBIRD_*` values used by Cap to the gitignored `.env.analytics.local` file. Re-running the command is safe.
 
 Tinybird Local persists ClickHouse and metadata in named Docker volumes. Normal `pnpm docker:up` and the public self-hosted Compose setup do not start analytics.
 
@@ -16,9 +16,9 @@ Tinybird Local persists ClickHouse and metadata in named Docker volumes. Normal 
 | --- | --- |
 | `pnpm analytics:validate` | Validate schemas, tokens, fixtures, retention, deduplication, and existing viewer resources without Docker |
 | `pnpm analytics:test` | Run the shared contract, web, desktop, billing regression, infrastructure, and static validation suites |
-| `pnpm analytics:local` | Start, build, test, and print the local runtime environment |
+| `pnpm analytics:local` | Start, build, test, and write the local runtime environment |
 | `pnpm analytics:local:test` | Run Tinybird fixture tests against Tinybird Local |
-| `pnpm analytics:local:tokens` | Print the deterministic local runtime host and workspace token |
+| `pnpm analytics:local:tokens` | Write the deterministic local runtime host and workspace token to `.env.analytics.local` |
 | `pnpm analytics:local:stop` | Stop Tinybird Local while preserving its volumes |
 | `pnpm analytics:deploy:check` | Validate a cloud deployment without promoting it |
 | `pnpm analytics:deploy` | Run the cloud deployment check, deploy, and wait for completion |
@@ -32,6 +32,7 @@ Cloud deployment requires:
 
 - `TINYBIRD_DEPLOY_TOKEN`: a CI token limited to `WORKSPACE:DEPLOY`.
 - `TINYBIRD_URL`: the regional Tinybird API URL.
+- `TINYBIRD_WORKSPACE_ID`: the production Workspace UUID verified before every cloud check or deployment.
 
 The deployed datafiles create two runtime tokens:
 

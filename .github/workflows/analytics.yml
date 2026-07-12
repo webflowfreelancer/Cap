@@ -76,7 +76,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: ./.github/actions/setup-js
       - name: Run analytics regression suites
         run: pnpm analytics:test
@@ -101,9 +101,10 @@ jobs:
     env:
       TINYBIRD_DEPLOY_TOKEN: ${{ secrets.TINYBIRD_DEPLOY_TOKEN }}
       TINYBIRD_URL: ${{ secrets.TINYBIRD_URL }}
+      TINYBIRD_WORKSPACE_ID: ${{ secrets.TINYBIRD_WORKSPACE_ID }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 20
       - name: Check and deploy Tinybird project

@@ -7,10 +7,13 @@ import test from "node:test";
 import {
 	assertSafeStep,
 	cloudEnvironment,
+	LOCAL_ENV_FILE,
 	localEnvironment,
 	operationPlan,
 	TINYBIRD_PROJECT_DIR,
 	validateAnalyticsProject,
+	verifyCloudWorkspace,
+	writeLocalEnvironmentFile,
 } from "../tooling.js";
 
 test("analytics project passes deterministic static validation", () => {
@@ -36,6 +39,11 @@ test("all routine operation plans reject destructive commands", () => {
 });
 
 test("cloud deploy checks before deploying and waits for completion", () => {
+	assert.ok(
+		operationPlan("cloud-deploy").some(
+			(step) => step.type === "verify-cloud-workspace",
+		),
+	);
 	const commands = operationPlan("cloud-deploy")
 		.filter((step) => step.command)
 		.map((step) => step.args.slice(-4).join(" "));
@@ -45,14 +53,19 @@ test("cloud deploy checks before deploying and waits for completion", () => {
 	]);
 });
 
-test("local setup builds, tests and prints its deterministic environment", () => {
+test("local setup builds, tests and writes its deterministic environment", () => {
 	const commands = operationPlan("local")
 		.filter((step) => step.command)
 		.map((step) => step.args.join(" "));
 	assert.ok(commands.some((command) => command.endsWith("--local build")));
 	assert.ok(commands.some((command) => command.endsWith("--local test run")));
 	assert.ok(
-		operationPlan("local").some((step) => step.type === "print-local-env"),
+		operationPlan("local").some((step) => step.type === "write-local-env"),
+	);
+	assert.ok(
+		commands.some((command) =>
+			command.includes("up -d --wait --wait-timeout 60 tinybird-local"),
+		),
 	);
 	const first = localEnvironment({});
 	const second = localEnvironment({});
@@ -89,14 +102,61 @@ test("unsafe analytics operations are blocked", () => {
 
 test("cloud auth requires a dedicated deploy token", () => {
 	assert.throws(() => cloudEnvironment({}), /TINYBIRD_DEPLOY_TOKEN/);
+	assert.throws(
+		() => cloudEnvironment({ TINYBIRD_DEPLOY_TOKEN: "deploy-token" }),
+		/TINYBIRD_WORKSPACE_ID/,
+	);
 	const environment = cloudEnvironment({
 		TINYBIRD_DEPLOY_TOKEN: "deploy-token",
 		PRODUCT_ANALYTICS_TINYBIRD_HOST: "https://example.tinybird.co",
+		TINYBIRD_WORKSPACE_ID: "12345678-1234-4234-8234-123456789abc",
 	});
 	assert.equal(environment.TINYBIRD_TOKEN, "deploy-token");
 	assert.equal(environment.TB_TOKEN, "deploy-token");
 	assert.equal(environment.TINYBIRD_URL, "https://example.tinybird.co");
 	assert.equal(environment.TB_HOST, "https://example.tinybird.co");
+	assert.equal(
+		environment.TINYBIRD_WORKSPACE_ID,
+		"12345678-1234-4234-8234-123456789abc",
+	);
+});
+
+test("cloud deploy verifies the token workspace before mutation", () => {
+	const workspaceId = "12345678-1234-4234-8234-123456789abc";
+	const env = {
+		TINYBIRD_DEPLOY_TOKEN: "deploy-token",
+		TINYBIRD_URL: "https://api.tinybird.co",
+		TINYBIRD_WORKSPACE_ID: workspaceId,
+	};
+	assert.equal(
+		verifyCloudWorkspace(env, () => `| production | ${workspaceId} | admin |`),
+		workspaceId,
+	);
+	assert.throws(
+		() =>
+			verifyCloudWorkspace(
+				env,
+				() => "| staging | 87654321-4321-4321-8321-cba987654321 | admin |",
+			),
+		/does not target/,
+	);
+});
+
+test("local credentials are written to a private gitignored env file", () => {
+	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cap-analytics-env-"));
+	const filePath = path.join(tempRoot, ".env.analytics.local");
+	try {
+		writeLocalEnvironmentFile(filePath, localEnvironment({}));
+		const contents = fs.readFileSync(filePath, "utf8");
+		assert.match(contents, /^PRODUCT_ANALYTICS_TINYBIRD_HOST=/m);
+		assert.match(contents, /^PRODUCT_ANALYTICS_TINYBIRD_TOKEN=/m);
+		if (process.platform !== "win32") {
+			assert.equal(fs.statSync(filePath).mode & 0o777, 0o600);
+		}
+		assert.equal(path.basename(LOCAL_ENV_FILE), ".env.analytics.local");
+	} finally {
+		fs.rmSync(tempRoot, { force: true, recursive: true });
+	}
 });
 
 test("fixture validation catches duplicate event IDs", () => {

@@ -180,7 +180,7 @@ Cap uses [Tinybird](https://www.tinybird.co) for product and viewer analytics. T
 
 | Command | Purpose |
 | --- | --- |
-| `pnpm analytics:local` | Start the optional Tinybird Local Docker profile, build resources, run fixtures, and print runtime environment values |
+| `pnpm analytics:local` | Start the optional Tinybird Local Docker profile, build resources, run fixtures, and write `.env.analytics.local` |
 | `pnpm analytics:test` | Run deterministic infrastructure tests and static validation |
 | `pnpm analytics:deploy:check` | Validate a cloud deployment without promoting it |
 | `pnpm analytics:deploy` | Safely deploy checked-in Tinybird resources |
