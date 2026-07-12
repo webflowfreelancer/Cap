@@ -1,11 +1,18 @@
-import { buildEnv, serverEnv } from "@cap/env";
+import { randomUUID } from "node:crypto";
+import { serverEnv } from "@cap/env";
 import { stripe } from "@cap/utils";
 import type { NextRequest } from "next/server";
-import { PostHog } from "posthog-node";
+import {
+	readAnalyticsAnonymousId,
+	scheduleLegacyPostHogEvent,
+	scheduleServerProductEvent,
+} from "@/lib/analytics/server";
 
 export async function POST(request: NextRequest) {
 	console.log("Starting guest checkout process");
 	const { priceId, quantity } = await request.json();
+	const analyticsAnonymousId = readAnalyticsAnonymousId(request);
+	const checkoutAnonymousId = analyticsAnonymousId ?? `guest:${randomUUID()}`;
 
 	console.log("Received guest checkout request:", { priceId, quantity });
 
@@ -25,32 +32,35 @@ export async function POST(request: NextRequest) {
 			metadata: {
 				platform: "web",
 				guestCheckout: "true",
+				analyticsIsFirstPurchase: "true",
+				analyticsAnonymousId: checkoutAnonymousId,
 			},
 		});
 
 		if (checkoutSession.url) {
 			console.log("Successfully created guest checkout session");
+			scheduleServerProductEvent({
+				eventId: `checkout:${checkoutSession.id}`,
+				eventName: "guest_checkout_started",
+				anonymousId: checkoutAnonymousId,
+				platform: "web",
+				properties: {
+					price_id: priceId,
+					quantity: quantity || 1,
+				},
+			});
 
-			try {
-				const ph = new PostHog(buildEnv.NEXT_PUBLIC_POSTHOG_KEY || "", {
-					host: buildEnv.NEXT_PUBLIC_POSTHOG_HOST || "",
-				});
-
-				ph.capture({
-					distinctId: `guest-${checkoutSession.id}`,
-					event: "guest_checkout_started",
-					properties: {
-						price_id: priceId,
-						quantity: quantity || 1,
-						platform: "web",
-						session_id: checkoutSession.id,
-					},
-				});
-
-				await ph.shutdown();
-			} catch (e) {
-				console.error("Failed to capture guest_checkout_started in PostHog", e);
-			}
+			scheduleLegacyPostHogEvent({
+				distinctId: checkoutAnonymousId,
+				eventName: "guest_checkout_started",
+				properties: {
+					$insert_id: `checkout:${checkoutSession.id}`,
+					price_id: priceId,
+					quantity: quantity || 1,
+					platform: "web",
+					session_id: checkoutSession.id,
+				},
+			});
 
 			return Response.json({ url: checkoutSession.url }, { status: 200 });
 		}

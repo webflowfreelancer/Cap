@@ -1,13 +1,16 @@
 import { db } from "@cap/database";
 import { nanoId } from "@cap/database/helpers";
 import { developerCreditTransactions, users } from "@cap/database/schema";
-import { buildEnv, serverEnv } from "@cap/env";
+import { serverEnv } from "@cap/env";
 import { stripe } from "@cap/utils";
 import { Organisation, User } from "@cap/web-domain";
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { PostHog } from "posthog-node";
 import type Stripe from "stripe";
+import {
+	scheduleLegacyPostHogEvent,
+	scheduleServerProductEvent,
+} from "@/lib/analytics/server";
 import { addCreditsToAccount } from "@/lib/developer-credits";
 
 const relevantEvents = new Set([
@@ -16,6 +19,98 @@ const relevantEvents = new Set([
 	"customer.subscription.updated",
 	"customer.subscription.deleted",
 ]);
+
+type PurchaseAnalyticsUser = Pick<
+	typeof users.$inferSelect,
+	"id" | "activeOrganizationId"
+>;
+
+function isSettledSubscriptionPurchase(
+	session: Stripe.Checkout.Session,
+	subscription: Stripe.Subscription,
+) {
+	return (
+		(session.payment_status === "paid" ||
+			session.payment_status === "no_payment_required") &&
+		(subscription.status === "active" || subscription.status === "trialing")
+	);
+}
+
+function scheduleSubscriptionPurchaseEvents({
+	eventId,
+	occurredAt,
+	session,
+	subscription,
+	inviteQuota,
+	user,
+	isFirstPurchase,
+}: {
+	eventId: string;
+	occurredAt: string;
+	session: Stripe.Checkout.Session;
+	subscription: Stripe.Subscription;
+	inviteQuota: number;
+	user?: PurchaseAnalyticsUser;
+	isFirstPurchase: boolean;
+}) {
+	const isGuestCheckout = session.metadata?.guestCheckout === "true";
+	const platform =
+		session.metadata?.platform === "desktop"
+			? "desktop"
+			: session.metadata?.platform === "web"
+				? "web"
+				: "server";
+	const anonymousId = session.metadata?.analyticsAnonymousId;
+	const distinctId = user?.id ?? anonymousId ?? `stripe:${session.id}`;
+	const price = subscription.items.data[0]?.price;
+	const revenueProperties = {
+		payment_status: session.payment_status,
+		subscription_status: subscription.status,
+		amount_total_minor: session.amount_total,
+		amount_subtotal_minor: session.amount_subtotal,
+		discount_amount_minor: session.total_details?.amount_discount,
+		currency: session.currency,
+		unit_amount_minor: price?.unit_amount,
+		billing_interval: price?.recurring?.interval,
+		billing_interval_count: price?.recurring?.interval_count,
+	};
+
+	scheduleServerProductEvent({
+		eventId: `stripe:${eventId}:purchase_completed`,
+		eventName: "purchase_completed",
+		occurredAt,
+		anonymousId,
+		platform,
+		userId: user?.id,
+		organizationId: user?.activeOrganizationId,
+		properties: {
+			...revenueProperties,
+			invite_quota: inviteQuota,
+			price_id: price?.id,
+			quantity: inviteQuota,
+			is_onboarding: session.metadata?.isOnBoarding === "true",
+			is_first_purchase: isFirstPurchase,
+			is_guest_checkout: isGuestCheckout,
+		},
+	});
+
+	scheduleLegacyPostHogEvent({
+		distinctId,
+		eventName: "purchase_completed",
+		properties: {
+			$insert_id: `stripe:${eventId}:purchase_completed`,
+			subscription_id: subscription.id,
+			...revenueProperties,
+			invite_quota: inviteQuota,
+			price_id: price?.id,
+			quantity: inviteQuota,
+			is_onboarding: session.metadata?.isOnBoarding === "true",
+			platform: platform === "server" ? "unknown" : platform,
+			is_first_purchase: isFirstPurchase,
+			is_guest_checkout: isGuestCheckout,
+		},
+	});
+}
 
 async function grantDeveloperCredits(
 	session: Stripe.Checkout.Session,
@@ -329,39 +424,17 @@ export const POST = async (req: Request) => {
 
 				console.log("Successfully updated user in database");
 
-				try {
-					const serverPostHog = new PostHog(
-						buildEnv.NEXT_PUBLIC_POSTHOG_KEY || "",
-						{ host: buildEnv.NEXT_PUBLIC_POSTHOG_HOST || "" },
-					);
-
-					const isFirstPurchase = !dbUser.stripeSubscriptionId;
-					const isGuestCheckout = session.metadata?.guestCheckout === "true";
-					serverPostHog.capture({
-						distinctId: dbUser.id,
-						event: "purchase_completed",
-						properties: {
-							subscription_id: subscription.id,
-							subscription_status: subscription.status,
-							invite_quota: inviteQuota,
-							price_id: subscription.items.data[0]?.price.id,
-							quantity: inviteQuota,
-							is_onboarding: session.metadata?.isOnBoarding === "true",
-							platform:
-								session.metadata?.platform === "desktop"
-									? "desktop"
-									: session.metadata?.platform === "web"
-										? "web"
-										: "unknown",
-							is_first_purchase: isFirstPurchase,
-							is_guest_checkout: isGuestCheckout,
-						},
+				if (isSettledSubscriptionPurchase(session, subscription)) {
+					scheduleSubscriptionPurchaseEvents({
+						eventId: event.id,
+						occurredAt: new Date(event.created * 1000).toISOString(),
+						session,
+						subscription,
+						inviteQuota,
+						user: dbUser,
+						isFirstPurchase:
+							session.metadata?.analyticsIsFirstPurchase === "true",
 					});
-
-					await serverPostHog.shutdown();
-					console.log("Successfully tracked purchase event in PostHog");
-				} catch (error) {
-					console.error("Error tracking purchase in PostHog:", error);
 				}
 			}
 
@@ -373,6 +446,45 @@ export const POST = async (req: Request) => {
 
 				if (session.metadata?.type === "developer_credits") {
 					return await grantDeveloperCredits(session);
+				}
+
+				if (typeof session.subscription === "string") {
+					const subscription = await stripe().subscriptions.retrieve(
+						session.subscription,
+					);
+					if (isSettledSubscriptionPurchase(session, subscription)) {
+						const inviteQuota = subscription.items.data.reduce(
+							(total, item) => total + (item.quantity || 1),
+							0,
+						);
+						let dbUser: typeof users.$inferSelect | null = null;
+						if (typeof session.customer === "string") {
+							const customer = await stripe().customers.retrieve(
+								session.customer,
+							);
+							if (!customer.deleted) {
+								const userId = customer.metadata.userId
+									? User.UserId.make(customer.metadata.userId)
+									: undefined;
+								dbUser = await findUserWithRetry(
+									customer.email ?? "",
+									userId,
+									1,
+								);
+							}
+						}
+
+						scheduleSubscriptionPurchaseEvents({
+							eventId: event.id,
+							occurredAt: new Date(event.created * 1000).toISOString(),
+							session,
+							subscription,
+							inviteQuota,
+							...(dbUser ? { user: dbUser } : {}),
+							isFirstPurchase:
+								session.metadata?.analyticsIsFirstPurchase === "true",
+						});
+					}
 				}
 			}
 

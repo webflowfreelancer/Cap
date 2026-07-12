@@ -1,0 +1,152 @@
+import {
+	createProductEventRows,
+	PRODUCT_ANALYTICS_LIMITS,
+} from "@cap/analytics";
+import {
+	ProductAnalytics,
+	resolveProductAnalyticsActor,
+} from "@cap/web-backend";
+import {
+	HttpApi,
+	HttpApiBuilder,
+	HttpApiEndpoint,
+	HttpApiError,
+	HttpApiGroup,
+	HttpApiSchema,
+	HttpServerRequest,
+} from "@effect/platform";
+import { Effect, Layer, Schema } from "effect";
+import {
+	getProductAnalyticsRateLimitKey,
+	isTrustedAnalyticsRequest,
+	normalizeGeoHeader,
+	normalizeProductEventBatch,
+	ProductAnalyticsRateLimiter,
+} from "@/lib/analytics/request";
+import { isRateLimited, RATE_LIMIT_IDS } from "@/lib/rate-limit";
+import { apiToHandler } from "@/lib/server";
+import { allowedOrigins } from "@/utils/cors";
+
+class RateLimited extends Schema.TaggedError<RateLimited>()(
+	"RateLimited",
+	{},
+	HttpApiSchema.annotations({ status: 429 }),
+) {}
+
+class Api extends HttpApi.make("ProductAnalyticsApi").add(
+	HttpApiGroup.make("events").add(
+		HttpApiEndpoint.post("capture", "/api/events")
+			.setPayload(
+				Schema.Struct({
+					events: Schema.Array(Schema.Unknown).pipe(
+						Schema.minItems(1),
+						Schema.maxItems(PRODUCT_ANALYTICS_LIMITS.batchSize),
+					),
+				}),
+			)
+			.addSuccess(Schema.Struct({ accepted: Schema.Number }))
+			.addError(HttpApiError.BadRequest)
+			.addError(HttpApiError.ServiceUnavailable)
+			.addError(RateLimited),
+	),
+) {}
+
+const RequestHeaders = Schema.Struct({
+	"content-length": Schema.optional(Schema.String),
+	"sec-fetch-site": Schema.optional(Schema.String),
+	origin: Schema.optional(Schema.String),
+	"x-vercel-ip-country": Schema.optional(Schema.String),
+	"x-vercel-ip-country-region": Schema.optional(Schema.String),
+	"x-vercel-ip-city": Schema.optional(Schema.String),
+	"x-forwarded-for": Schema.optional(Schema.String),
+	"x-real-ip": Schema.optional(Schema.String),
+});
+
+const fallbackRateLimiter = new ProductAnalyticsRateLimiter();
+
+const ApiLive = HttpApiBuilder.api(Api).pipe(
+	Layer.provide(
+		HttpApiBuilder.group(Api, "events", (handlers) =>
+			Effect.gen(function* () {
+				const analytics = yield* ProductAnalytics;
+
+				return handlers.handle("capture", ({ payload }) =>
+					Effect.gen(function* () {
+						const headers = yield* HttpServerRequest.schemaHeaders(
+							RequestHeaders,
+						).pipe(Effect.mapError(() => new HttpApiError.BadRequest()));
+						if (
+							!isTrustedAnalyticsRequest(
+								{
+									contentLength: headers["content-length"],
+									origin: headers.origin,
+									secFetchSite: headers["sec-fetch-site"],
+								},
+								allowedOrigins,
+							)
+						) {
+							return yield* Effect.fail(new HttpApiError.BadRequest());
+						}
+
+						if (
+							fallbackRateLimiter.isRateLimited(
+								getProductAnalyticsRateLimitKey({
+									xForwardedFor: headers["x-forwarded-for"],
+									xRealIp: headers["x-real-ip"],
+								}),
+							)
+						) {
+							return yield* Effect.fail(new RateLimited());
+						}
+
+						if (
+							yield* Effect.promise(() =>
+								isRateLimited(RATE_LIMIT_IDS.PRODUCT_ANALYTICS_EVENTS),
+							)
+						) {
+							return yield* Effect.fail(new RateLimited());
+						}
+
+						const events = normalizeProductEventBatch(payload.events);
+						if (!events) {
+							return yield* Effect.fail(new HttpApiError.BadRequest());
+						}
+
+						const actor = yield* resolveProductAnalyticsActor;
+						const rows = createProductEventRows(events, {
+							receivedAt: new Date().toISOString(),
+							source: "client",
+							userId: actor?.userId,
+							organizationId: actor?.organizationId,
+							country: normalizeGeoHeader(headers["x-vercel-ip-country"]),
+							region: normalizeGeoHeader(headers["x-vercel-ip-country-region"]),
+							city: normalizeGeoHeader(headers["x-vercel-ip-city"], true),
+						});
+
+						yield* analytics
+							.append(rows)
+							.pipe(
+								Effect.catchTag("ProductAnalyticsError", (error) =>
+									Effect.logWarning(
+										"Product analytics ingestion failed",
+										error,
+									).pipe(
+										Effect.andThen(
+											Effect.fail(new HttpApiError.ServiceUnavailable()),
+										),
+									),
+								),
+							);
+
+						return { accepted: rows.length };
+					}),
+				);
+			}),
+		),
+	),
+);
+
+const handler = apiToHandler(ApiLive);
+
+export const POST = handler;
+export const OPTIONS = handler;

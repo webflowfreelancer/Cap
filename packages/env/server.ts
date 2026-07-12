@@ -107,6 +107,8 @@ function createServerEnv() {
 			/// Tinybird analytics
 			TINYBIRD_HOST: z.string().optional(),
 			TINYBIRD_TOKEN: z.string().optional(),
+			PRODUCT_ANALYTICS_TINYBIRD_HOST: z.string().optional(),
+			PRODUCT_ANALYTICS_TINYBIRD_TOKEN: z.string().optional(),
 			VERCEL_ENV: z
 				.union([
 					z.literal("production"),

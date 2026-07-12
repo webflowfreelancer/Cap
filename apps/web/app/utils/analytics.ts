@@ -1,6 +1,7 @@
 import posthog from "posthog-js";
 import * as uuid from "uuid";
 import { trackMetaEvent } from "../Layout/MetaPixel";
+import { captureProductEvent } from "./product-analytics";
 
 export function initAnonymousUser() {
 	try {
@@ -12,7 +13,10 @@ export function initAnonymousUser() {
 	}
 }
 
-export function identifyUser(userId: string, properties?: Record<string, any>) {
+export function identifyUser(
+	userId: string,
+	properties?: Record<string, unknown>,
+) {
 	try {
 		const currentId = posthog.get_distinct_id();
 		const anonymousId = localStorage.getItem("anonymous_id");
@@ -34,7 +38,15 @@ export function identifyUser(userId: string, properties?: Record<string, any>) {
 
 export function trackEvent(
 	eventName: string,
-	properties?: Record<string, any>,
+	properties?: Record<string, unknown>,
+) {
+	captureProductEvent(eventName, properties);
+	trackExternalEvent(eventName, properties);
+}
+
+export function trackExternalEvent(
+	eventName: string,
+	properties?: Record<string, unknown>,
 ) {
 	try {
 		if (!posthog || typeof posthog.capture !== "function") {

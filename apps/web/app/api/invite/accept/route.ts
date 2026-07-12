@@ -9,6 +9,10 @@ import {
 } from "@cap/database/schema";
 import { and, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
+import {
+	readAnalyticsAnonymousId,
+	scheduleServerProductEvent,
+} from "@/lib/analytics/server";
 import { normalizeAssignableOrganizationRole } from "@/lib/permissions/roles";
 import { calculateProSeats } from "@/utils/organization";
 
@@ -33,6 +37,10 @@ export async function POST(request: NextRequest) {
 	}
 
 	try {
+		let joinedMemberId: string | undefined;
+		let joinedOrganizationId: string | undefined;
+		let joinedRole: string | undefined;
+		let assignedProSeat = false;
 		await db().transaction(async (tx) => {
 			const [invite] = await tx
 				.select()
@@ -72,6 +80,9 @@ export async function POST(request: NextRequest) {
 					role,
 				});
 				memberId = newId;
+				joinedMemberId = newId;
+				joinedOrganizationId = invite.organizationId;
+				joinedRole = role;
 			}
 
 			const [org] = await tx
@@ -111,6 +122,7 @@ export async function POST(request: NextRequest) {
 					});
 
 					if (proSeatsRemaining > 0) {
+						assignedProSeat = true;
 						await tx
 							.update(organizationMembers)
 							.set({ hasProSeat: true })
@@ -147,6 +159,21 @@ export async function POST(request: NextRequest) {
 				.delete(organizationInvites)
 				.where(eq(organizationInvites.id, inviteId));
 		});
+
+		if (joinedMemberId && joinedOrganizationId) {
+			scheduleServerProductEvent({
+				eventId: `organization_member:${joinedMemberId}:joined`,
+				eventName: "organization_member_joined",
+				anonymousId: readAnalyticsAnonymousId(request),
+				platform: "web",
+				userId: user.id,
+				organizationId: joinedOrganizationId,
+				properties: {
+					role: joinedRole,
+					assigned_pro_seat: assignedProSeat,
+				},
+			});
+		}
 
 		return NextResponse.json({ success: true });
 	} catch (error) {

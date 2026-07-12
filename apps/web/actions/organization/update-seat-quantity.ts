@@ -11,6 +11,7 @@ import { stripe } from "@cap/utils";
 import type { Organisation } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { scheduleServerProductEvent } from "@/lib/analytics/server";
 import { calculateProSeats } from "@/utils/organization";
 
 async function getOwnerSubscription(
@@ -205,6 +206,27 @@ export async function updateSeatQuantity(
 	}
 
 	revalidatePath("/dashboard/settings/organization");
+	const latestInvoice =
+		typeof updatedSubscription.latest_invoice === "string"
+			? updatedSubscription.latest_invoice
+			: updatedSubscription.latest_invoice?.id;
+	scheduleServerProductEvent({
+		eventId: `seat_quantity:${subscription.id}:${latestInvoice ?? updatedSubscription.current_period_start}:${newQuantity}`,
+		eventName: "seat_quantity_changed",
+		platform: "web",
+		userId: user.id,
+		organizationId,
+		properties: {
+			previous_quantity: currentQuantity,
+			new_quantity: newQuantity,
+			quantity_delta: newQuantity - currentQuantity,
+			direction: isSeatIncrease ? "increase" : "decrease",
+			price_id: subscriptionItem.price.id,
+			unit_amount_minor: subscriptionItem.price.unit_amount,
+			currency: subscriptionItem.price.currency,
+			billing_interval: subscriptionItem.price.recurring?.interval,
+		},
+	});
 
 	return { success: true, newQuantity };
 }

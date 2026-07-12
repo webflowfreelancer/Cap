@@ -1,17 +1,22 @@
 import { db } from "@cap/database";
 import { getCurrentUser } from "@cap/database/auth/session";
 import { users } from "@cap/database/schema";
-import { buildEnv, serverEnv } from "@cap/env";
+import { serverEnv } from "@cap/env";
 import { stripe, userIsPro } from "@cap/utils";
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { PostHog } from "posthog-node";
 import type Stripe from "stripe";
+import {
+	readAnalyticsAnonymousId,
+	scheduleLegacyPostHogEvent,
+	scheduleServerProductEvent,
+} from "@/lib/analytics/server";
 
 export async function POST(request: NextRequest) {
 	const user = await getCurrentUser();
 	let customerId = user?.stripeCustomerId;
 	const { priceId, quantity, isOnBoarding } = await request.json();
+	const analyticsAnonymousId = readAnalyticsAnonymousId(request);
 
 	if (!priceId) {
 		console.error("Price ID not found");
@@ -78,29 +83,36 @@ export async function POST(request: NextRequest) {
 				platform: "web",
 				dubCustomerId: user.id,
 				isOnBoarding: isOnBoarding ? "true" : "false",
+				analyticsIsFirstPurchase: user.stripeSubscriptionId ? "false" : "true",
+				...(analyticsAnonymousId ? { analyticsAnonymousId } : {}),
 			},
 		});
 
 		if (checkoutSession.url) {
-			try {
-				const ph = new PostHog(buildEnv.NEXT_PUBLIC_POSTHOG_KEY || "", {
-					host: buildEnv.NEXT_PUBLIC_POSTHOG_HOST || "",
-				});
+			scheduleServerProductEvent({
+				eventId: `checkout:${checkoutSession.id}`,
+				eventName: "checkout_started",
+				anonymousId: analyticsAnonymousId,
+				platform: "web",
+				userId: user.id,
+				organizationId: user.activeOrganizationId,
+				properties: {
+					price_id: priceId,
+					quantity: quantity ?? 1,
+					is_onboarding: Boolean(isOnBoarding),
+				},
+			});
 
-				ph.capture({
-					distinctId: user.id,
-					event: "checkout_started",
-					properties: {
-						price_id: priceId,
-						quantity: quantity,
-						platform: "web",
-					},
-				});
-
-				await ph.shutdown();
-			} catch (e) {
-				console.error("Failed to capture checkout_started in PostHog", e);
-			}
+			scheduleLegacyPostHogEvent({
+				distinctId: user.id,
+				eventName: "checkout_started",
+				properties: {
+					$insert_id: `checkout:${checkoutSession.id}`,
+					price_id: priceId,
+					quantity,
+					platform: "web",
+				},
+			});
 
 			return Response.json({ url: checkoutSession.url }, { status: 200 });
 		}

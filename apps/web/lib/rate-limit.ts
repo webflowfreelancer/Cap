@@ -69,6 +69,7 @@ export const RATE_LIMIT_IDS = {
 	MESSENGER_MESSAGE: "rl_messenger_message",
 	/** Unauthed analytics view tracking (Tinybird ingest + notifications). Suggested: 60 / 1m per IP. */
 	ANALYTICS_TRACK: "rl_analytics_track",
+	PRODUCT_ANALYTICS_EVENTS: "rl_product_analytics_events",
 	/** Unauthed guest checkout (Stripe object/cost abuse). Suggested: 10 / 10m per IP. */
 	GUEST_CHECKOUT: "rl_guest_checkout",
 	/** Unauthed desktop log → Discord forwarding (spam). Suggested: 10 / 1m per IP. */

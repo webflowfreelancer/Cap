@@ -10,6 +10,7 @@ import {
 	ImageUploads,
 	Organisations,
 	OrganisationsPolicy,
+	ProductAnalytics,
 	S3Buckets,
 	Spaces,
 	SpacesPolicy,
@@ -78,15 +79,13 @@ const WorkflowRpcLive = Layer.unwrapScoped(
 		const authMiddleware = RpcMiddleware.layerClient(
 			Workflows.SecretAuthMiddleware,
 			({ request }) =>
-				Effect.gen(function* () {
-					return {
-						...request,
-						headers: Headers.set(
-							request.headers,
-							"authorization",
-							Redacted.value(authSecret.value),
-						),
-					};
+				Effect.succeed({
+					...request,
+					headers: Headers.set(
+						request.headers,
+						"authorization",
+						Redacted.value(authSecret.value),
+					),
 				}),
 		);
 
@@ -112,6 +111,7 @@ export const Dependencies = Layer.mergeAll(
 	VideosPolicy.Default,
 	VideosRepo.Default,
 	Tinybird.Default,
+	ProductAnalytics.Default,
 	Extensions.Default,
 	Folders.Default,
 	SpacesPolicy.Default,

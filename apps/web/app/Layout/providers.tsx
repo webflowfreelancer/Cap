@@ -44,16 +44,14 @@ export function PostHogProvider({
 		if (!host) return undefined;
 		const base: CapPostHogConfig = {
 			api_host: host,
+			autocapture: false,
 			capture_pageview: false,
-			capture_pageleave: true,
+			capture_pageleave: false,
+			disable_session_recording: true,
 			bootstrap: initialBootstrap.current?.distinctID
 				? initialBootstrap.current
 				: undefined,
 		};
-
-		if (process.env.NEXT_PUBLIC_POSTHOG_DISABLE_SESSION_RECORDING === "true") {
-			base.disable_session_recording = true;
-		}
 
 		return base;
 	}, [host]);

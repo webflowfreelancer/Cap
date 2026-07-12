@@ -8,6 +8,14 @@ export { ImageUploads } from "./ImageUploads/index.ts";
 export * from "./Loom/index.ts";
 export { Organisations } from "./Organisations/index.ts";
 export { OrganisationsPolicy } from "./Organisations/OrganisationsPolicy.ts";
+
+export {
+	hasAnalyticsSessionCookie,
+	ProductAnalytics,
+	ProductAnalyticsError,
+	resolveProductAnalyticsActor,
+	sendProductAnalyticsRows,
+} from "./ProductAnalytics/index.ts";
 export * from "./Rpcs.ts";
 export { S3Buckets } from "./S3Buckets/index.ts";
 export { Spaces } from "./Spaces/index.ts";

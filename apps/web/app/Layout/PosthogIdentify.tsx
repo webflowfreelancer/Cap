@@ -5,7 +5,7 @@ import { checkAndMarkUserSignedUpTracked } from "@/actions/analytics/track-user-
 import {
 	identifyUser,
 	initAnonymousUser,
-	trackEvent,
+	trackExternalEvent,
 } from "../utils/analytics";
 import { useCurrentUser } from "./AuthContext";
 
@@ -30,9 +30,8 @@ function Inner() {
 			(async () => {
 				const { shouldTrack } = await checkAndMarkUserSignedUpTracked();
 				if (shouldTrack) {
-					trackEvent("user_signed_up");
+					trackExternalEvent("user_signed_up");
 				}
-				trackEvent("user_signed_in");
 			})();
 		}
 	}, [user]);
