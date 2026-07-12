@@ -1,0 +1,28 @@
+DESCRIPTION >
+	Inspect hourly product event delivery quality over a maximum 31-day window.
+
+TOKEN product_events_agent_read READ
+
+NODE product_events_health_node
+SQL >
+	%
+	{% if not defined(start_time) %}
+		{{ error('start_time is required') }}
+	{% end %}
+	{% if not defined(end_time) %}
+		{{ error('end_time is required') }}
+	{% end %}
+	SELECT
+		sum(received_rows) AS received_rows,
+		uniqMerge(unique_events) AS unique_events,
+		received_rows - unique_events AS duplicate_rows,
+		sum(future_events) AS future_events,
+		sum(late_events) AS late_events,
+		sum(missing_identity_events) AS missing_identity_events
+	FROM product_events_health_hourly
+	WHERE hour >= toStartOfHour({{DateTime64(start_time)}})
+		AND hour <= {{DateTime64(end_time)}}
+		AND throwIf({{DateTime64(end_time)}} < {{DateTime64(start_time)}}, 'end_time must not precede start_time') = 0
+		AND throwIf({{DateTime64(end_time)}} > {{DateTime64(start_time)}} + INTERVAL 31 DAY, 'health windows cannot exceed 31 days') = 0
+
+TYPE ENDPOINT

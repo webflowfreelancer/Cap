@@ -60,7 +60,56 @@ services:
       /usr/bin/mc anonymous set-json /tmp/policy.json myminio/capso;
       exit 0;
       "
+
+  tinybird-local:
+    profiles: ["analytics"]
+    container_name: cap-tinybird-local
+    image: tinybirdco/tinybird-local@sha256:fd4284d2f1ad6a448823e5bc6414267848da964823dc9f98670793bb88031e4d
+    restart: unless-stopped
+    environment:
+      TB_LOCAL_USER_TOKEN: ${TB_LOCAL_USER_TOKEN:-}
+      TB_LOCAL_WORKSPACE_TOKEN: ${TB_LOCAL_WORKSPACE_TOKEN:-}
+    ports:
+      - "127.0.0.1:${TINYBIRD_LOCAL_PORT:-7181}:7181"
+    volumes:
+      - tinybird-clickhouse:/var/lib/clickhouse
+      - tinybird-metadata:/redis-data
+
+  tinybird-cli:
+    profiles: ["analytics"]
+    image: tinybirdco/tb-cli-docker:4.6.9@sha256:6f72ef340cb4ec6a4c4b4e724da4c48799c81c89912130dc7cd4cc61efc13945
+    depends_on:
+      - tinybird-local
+    network_mode: "service:tinybird-local"
+    working_dir: /workspace
+    entrypoint: ["tb"]
+    environment:
+      TB_LOCAL: "1"
+      TB_TOKEN: ${TB_LOCAL_WORKSPACE_TOKEN:-}
+      TB_USER_TOKEN: ${TB_LOCAL_USER_TOKEN:-}
+      TINYBIRD_TOKEN: ${TB_LOCAL_WORKSPACE_TOKEN:-}
+      TINYBIRD_URL: http://127.0.0.1:7181
+      PRODUCT_ANALYTICS_TINYBIRD_HOST: http://127.0.0.1:7181
+      PRODUCT_ANALYTICS_TINYBIRD_TOKEN: ${TB_LOCAL_WORKSPACE_TOKEN:-}
+    volumes:
+      - ../../scripts/analytics/tinybird:/workspace:ro
+      - ../../scripts/analytics/tinybird-local-workspace.json:/workspace/.tinyb:ro
+
+  tinybird-cloud-cli:
+    profiles: ["analytics"]
+    image: tinybirdco/tb-cli-docker:4.6.9@sha256:6f72ef340cb4ec6a4c4b4e724da4c48799c81c89912130dc7cd4cc61efc13945
+    working_dir: /workspace
+    entrypoint: ["tb"]
+    environment:
+      TINYBIRD_TOKEN: ${TINYBIRD_TOKEN:-}
+      TINYBIRD_URL: ${TINYBIRD_URL:-https://api.tinybird.co}
+      TB_TOKEN: ${TB_TOKEN:-}
+      TB_HOST: ${TB_HOST:-https://api.tinybird.co}
+    volumes:
+      - ../../scripts/analytics/tinybird:/workspace:ro
 volumes:
   ps-mysql:
   minio-data:
   minio-certs:
+  tinybird-clickhouse:
+  tinybird-metadata:

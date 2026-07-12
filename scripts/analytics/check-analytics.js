@@ -114,10 +114,15 @@ async function validatePipes(client) {
 				continue;
 			}
 
-			if ((pipe.type || "").toLowerCase() !== "materialized") {
+			const actualType = (pipe.type || "").toLowerCase();
+			if (actualType !== pipeDef.type) {
 				issues.push(
-					`Pipe ${pipeDef.name} is not materialized (type=${pipe.type ?? "unknown"}).`,
+					`Pipe ${pipeDef.name} has type ${pipe.type ?? "unknown"}, expected ${pipeDef.type}.`,
 				);
+				continue;
+			}
+			if (pipeDef.type !== "materialized") {
+				console.log(`✔ Pipe ${pipeDef.name} is ${pipeDef.type}`);
 				continue;
 			}
 

@@ -1,0 +1,18 @@
+DESCRIPTION >
+	Hourly delivery aggregates for stable, bounded product analytics health checks.
+
+TOKEN product_events_agent_read READ
+
+SCHEMA >
+	hour DateTime,
+	received_rows SimpleAggregateFunction(sum, UInt64),
+	unique_events AggregateFunction(uniq, String),
+	future_events SimpleAggregateFunction(sum, UInt64),
+	late_events SimpleAggregateFunction(sum, UInt64),
+	missing_identity_events SimpleAggregateFunction(sum, UInt64)
+
+ENGINE AggregatingMergeTree
+ENGINE_PARTITION_KEY toYYYYMM(hour)
+ENGINE_SORTING_KEY hour
+ENGINE_TTL hour + INTERVAL 400 DAY
+ENGINE_SETTINGS index_granularity = 256

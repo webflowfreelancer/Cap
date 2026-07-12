@@ -1,0 +1,110 @@
+name: Analytics
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/analytics.yml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "packages/local-docker/**"
+      - "packages/analytics/**"
+      - "packages/env/server.ts"
+      - "packages/web-backend/src/ProductAnalytics/**"
+      - "apps/web/actions/analytics/**"
+      - "apps/web/actions/organization/**"
+      - "apps/web/__tests__/unit/*analytics*.test.ts"
+      - "apps/web/__tests__/unit/developer-credits-webhook.test.ts"
+      - "apps/web/app/Layout/*Analytics*.tsx"
+      - "apps/web/app/api/events/**"
+      - "apps/web/app/api/invite/accept/route.ts"
+      - "apps/web/app/api/settings/billing/**"
+      - "apps/web/app/api/webhooks/stripe/route.ts"
+      - "apps/web/app/utils/analytics.ts"
+      - "apps/web/app/utils/product-analytics.ts"
+      - "apps/web/lib/analytics/**"
+      - "apps/web/lib/rate-limit.ts"
+      - "apps/desktop/src-tauri/src/lib.rs"
+      - "apps/desktop/src/utils/analytics.ts"
+      - "apps/desktop/src/utils/product-analytics.ts"
+      - "apps/desktop/src/utils/*analytics*.test.ts"
+      - "apps/desktop/src-tauri/src/posthog.rs"
+      - "scripts/analytics/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/analytics.yml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "packages/local-docker/**"
+      - "packages/analytics/**"
+      - "packages/env/server.ts"
+      - "packages/web-backend/src/ProductAnalytics/**"
+      - "apps/web/actions/analytics/**"
+      - "apps/web/actions/organization/**"
+      - "apps/web/__tests__/unit/*analytics*.test.ts"
+      - "apps/web/__tests__/unit/developer-credits-webhook.test.ts"
+      - "apps/web/app/Layout/*Analytics*.tsx"
+      - "apps/web/app/api/events/**"
+      - "apps/web/app/api/invite/accept/route.ts"
+      - "apps/web/app/api/settings/billing/**"
+      - "apps/web/app/api/webhooks/stripe/route.ts"
+      - "apps/web/app/utils/analytics.ts"
+      - "apps/web/app/utils/product-analytics.ts"
+      - "apps/web/lib/analytics/**"
+      - "apps/web/lib/rate-limit.ts"
+      - "apps/desktop/src-tauri/src/lib.rs"
+      - "apps/desktop/src/utils/analytics.ts"
+      - "apps/desktop/src/utils/product-analytics.ts"
+      - "apps/desktop/src/utils/*analytics*.test.ts"
+      - "apps/desktop/src-tauri/src/posthog.rs"
+      - "scripts/analytics/**"
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy the checked Tinybird project to production
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate and test analytics
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-js
+      - name: Run analytics regression suites
+        run: pnpm analytics:test
+      - name: Validate Docker Compose
+        run: node scripts/analytics/analytics-cli.js compose-check
+      - name: Build and test with Tinybird Local
+        run: node scripts/analytics/analytics-cli.js local
+      - name: Stop Tinybird Local
+        if: always()
+        run: node scripts/analytics/analytics-cli.js local-stop
+
+  deploy:
+    name: Deploy analytics
+    needs: validate
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.deploy == true)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: analytics-production
+      cancel-in-progress: false
+    environment: production
+    env:
+      TINYBIRD_DEPLOY_TOKEN: ${{ secrets.TINYBIRD_DEPLOY_TOKEN }}
+      TINYBIRD_URL: ${{ secrets.TINYBIRD_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check and deploy Tinybird project
+        run: node scripts/analytics/analytics-cli.js cloud-deploy

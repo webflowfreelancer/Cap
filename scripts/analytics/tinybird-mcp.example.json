@@ -1,0 +1,12 @@
+{
+	"mcpServers": {
+		"cap-product-analytics": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"mcp-remote",
+				"https://mcp.tinybird.co?token=TINYBIRD_AGENT_TOKEN&host=TINYBIRD_URL"
+			]
+		}
+	}
+}

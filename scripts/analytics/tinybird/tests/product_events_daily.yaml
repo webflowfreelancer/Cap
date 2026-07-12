@@ -1,0 +1,27 @@
+- name: product_events_daily_recording_started
+  description: Counts unique recording starts by day, source and platform.
+  expected_http_status: 200
+  parameters: start_date=2026-01-10&end_date=2026-01-10&event_name=recording_started
+  expected_result: |
+    {"date":"2026-01-10","event_name":"recording_started","source":"client","platform":"desktop","payment_status":"","subscription_status":"","events":2,"actors":2,"users":1,"organizations":1}
+
+- name: product_events_daily_web_signup
+  description: Filters the daily rollup by source and platform.
+  expected_http_status: 200
+  parameters: start_date=2026-01-10&end_date=2026-01-10&source=server&platform=web
+  expected_result: |
+    {"date":"2026-01-10","event_name":"user_signed_up","source":"server","platform":"web","payment_status":"","subscription_status":"","events":1,"actors":1,"users":1,"organizations":1}
+
+- name: product_events_daily_paid_purchase
+  description: Separates paid purchases from no-payment trials without scanning raw events.
+  expected_http_status: 200
+  parameters: start_date=2026-01-11&end_date=2026-01-11&event_name=purchase_completed&payment_status=paid&subscription_status=active
+  expected_result: |
+    {"date":"2026-01-11","event_name":"purchase_completed","source":"server","platform":"web","payment_status":"paid","subscription_status":"active","events":1,"actors":1,"users":1,"organizations":1}
+
+- name: product_events_daily_trial
+  description: Keeps no-payment trials in their own purchase-status group.
+  expected_http_status: 200
+  parameters: start_date=2026-01-11&end_date=2026-01-11&event_name=purchase_completed&payment_status=no_payment_required&subscription_status=trialing
+  expected_result: |
+    {"date":"2026-01-11","event_name":"purchase_completed","source":"server","platform":"web","payment_status":"no_payment_required","subscription_status":"trialing","events":1,"actors":1,"users":1,"organizations":1}

@@ -5,6 +5,8 @@
 	"types": "./src/index.tsx",
 	"scripts": {
 		"dev": "pnpm docker:up",
+		"analytics:up": "node ../../scripts/analytics/analytics-cli.js local",
+		"analytics:stop": "node ../../scripts/analytics/analytics-cli.js local-stop",
 		"docker:up": "docker compose up -d --wait",
 		"docker:stop": "docker compose stop",
 		"docker:clean": "docker compose down -v"

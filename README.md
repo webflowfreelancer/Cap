@@ -176,14 +176,17 @@ The web API uses Effect and `@effect/platform` HTTP APIs. Desktop capture and ex
 
 ## Analytics
 
-Cap uses [Tinybird](https://www.tinybird.co) for viewer telemetry dashboards. Set `TINYBIRD_ADMIN_TOKEN` or `TINYBIRD_TOKEN` before running analytics commands.
+Cap uses [Tinybird](https://www.tinybird.co) for product and viewer analytics. The product event collector uses a separate append-only token, while agents use read-only query access.
 
 | Command | Purpose |
 | --- | --- |
-| `pnpm analytics:setup` | Deploy Tinybird datasources and pipes from `scripts/analytics/tinybird` |
+| `pnpm analytics:local` | Start the optional Tinybird Local Docker profile, build resources, run fixtures, and print runtime environment values |
+| `pnpm analytics:test` | Run deterministic infrastructure tests and static validation |
+| `pnpm analytics:deploy:check` | Validate a cloud deployment without promoting it |
+| `pnpm analytics:deploy` | Safely deploy checked-in Tinybird resources |
 | `pnpm analytics:check` | Validate that the Tinybird workspace matches the app expectations |
 
-`analytics:setup` can remove Tinybird resources outside the checked-in analytics configuration. Use it only against the workspace you intend to manage from this repo.
+Routine analytics commands reject destructive operations. See [scripts/analytics/README.md](scripts/analytics/README.md) for local setup, scoped credentials, deployment, and agent access.
 
 ## Contributing
 
