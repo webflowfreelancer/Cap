@@ -111,6 +111,9 @@ importers:
       '@aerofoil/rive-solid-canvas':
         specifier: ^2.1.4
         version: 2.1.4
+      '@cap/analytics':
+        specifier: workspace:*
+        version: link:../../packages/analytics
       '@cap/database':
         specifier: workspace:*
         version: link:../../packages/database
@@ -300,7 +303,7 @@ importers:
         version: 4.3.2
       '@tailwindcss/typography':
         specifier: ^0.5.9
-        version: 0.5.20(tailwindcss@3.4.19(yaml@2.9.0))
+        version: 0.5.20(tailwindcss@4.3.2)
       '@tauri-apps/cli':
         specifier: '>=2.1.0'
         version: 2.11.4
@@ -611,6 +614,9 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: ^3.485.0
         version: 3.1077.0
+      '@cap/analytics':
+        specifier: workspace:*
+        version: link:../../packages/analytics
       '@cap/database':
         specifier: workspace:*
         version: link:../../packages/database
@@ -1128,6 +1134,12 @@ importers:
         specifier: 3.17.14
         version: 3.17.14
 
+  packages/analytics:
+    devDependencies:
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.6(@types/debug@4.1.13)(@types/node@22.20.0)(@vitest/ui@3.2.6)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.32.0)(terser@5.48.0)(yaml@2.9.0)
+
   packages/config:
     dependencies:
       '@vitejs/plugin-react':
@@ -1598,6 +1610,9 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: ^3.485.0
         version: 3.1077.0
+      '@cap/analytics':
+        specifier: workspace:*
+        version: link:../analytics
       '@cap/database':
         specifier: workspace:*
         version: link:../database
@@ -19958,7 +19973,7 @@ snapshots:
       semver: 7.8.5
       string-width: 4.2.3
       supports-color: 8.1.1
-      tinyglobby: 0.2.15
+      tinyglobby: 0.2.17
       widest-line: 3.1.0
       wordwrap: 1.0.0
       wrap-ansi: 7.0.0
@@ -26505,7 +26520,7 @@ snapshots:
       eslint: 9.39.4(jiti@2.7.0)
       eslint-import-resolver-node: 0.3.10
       eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.62.1(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0))
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.62.1(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.7.0))
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.62.1(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.62.1(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0))
       eslint-plugin-jsx-a11y: 6.10.2(eslint@9.39.4(jiti@2.7.0))
       eslint-plugin-react: 7.37.5(eslint@9.39.4(jiti@2.7.0))
       eslint-plugin-react-hooks: 7.1.1(eslint@9.39.4(jiti@2.7.0))
@@ -26547,7 +26562,7 @@ snapshots:
       tinyglobby: 0.2.17
       unrs-resolver: 1.12.2
     optionalDependencies:
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.62.1(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.7.0))
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.62.1(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.62.1(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0))
     transitivePeerDependencies:
       - supports-color
 
@@ -26617,7 +26632,7 @@ snapshots:
       - eslint-import-resolver-webpack
       - supports-color
 
-  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.62.1(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.4(jiti@2.7.0)):
+  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.62.1(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.62.1(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0)))(eslint@9.39.4(jiti@2.7.0)):
     dependencies:
       '@rtsao/scc': 1.1.0
       array-includes: 3.1.9
@@ -34257,7 +34272,7 @@ snapshots:
   werift-common@0.0.3:
     dependencies:
       '@shinyoshiaki/jspack': 0.0.6
-      debug: 4.4.0
+      debug: 4.4.3(supports-color@8.1.1)
     transitivePeerDependencies:
       - supports-color
 
@@ -34276,7 +34291,7 @@ snapshots:
     dependencies:
       '@shinyoshiaki/jspack': 0.0.6
       buffer-crc32: 1.0.0
-      debug: 4.4.0
+      debug: 4.4.3(supports-color@8.1.1)
       int64-buffer: 1.1.0
       ip: 2.0.1
       lodash: 4.18.1
