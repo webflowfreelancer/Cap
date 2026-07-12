@@ -222,6 +222,19 @@ export function getOrCreateStorageId(
 	return created;
 }
 
+export function getOrCreateBrowserAnonymousId(
+	storage: Pick<Storage, "getItem" | "setItem"> | undefined,
+	cookieId: string | undefined,
+	createId: () => string,
+) {
+	if (!cookieId)
+		return getOrCreateStorageId(storage, ANONYMOUS_ID_KEY, createId);
+	try {
+		storage?.setItem(ANONYMOUS_ID_KEY, cookieId);
+	} catch {}
+	return cookieId;
+}
+
 export function createProductEventId(
 	randomUUID: (() => string) | null = getRandomUUID() ?? null,
 	now = Date.now(),
@@ -278,10 +291,12 @@ function getBrowserQueue() {
 
 function getAnonymousId() {
 	if (!anonymousId) {
-		anonymousId = getOrCreateStorageId(
-			getBrowserStorage("localStorage"),
-			ANONYMOUS_ID_KEY,
-			() => createProductEventId(),
+		const storage = getBrowserStorage("localStorage");
+		const cookieId = Cookies.get(PRODUCT_ANALYTICS_ANONYMOUS_ID_COOKIE);
+		anonymousId = getOrCreateBrowserAnonymousId(
+			storage,
+			cookieId,
+			createProductEventId,
 		);
 		persistAnonymousIdCookie(anonymousId);
 	}

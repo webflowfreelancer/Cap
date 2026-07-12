@@ -19,12 +19,13 @@ import {
 import { Effect, Layer, Schema } from "effect";
 import {
 	readProductAnalyticsBrowserToken,
-	verifyProductAnalyticsBrowserToken,
+	readProductAnalyticsBrowserTokenClaims,
 } from "@/lib/analytics/browser-token";
 import {
 	getProductAnalyticsRateLimitKey,
+	hasExpectedBrowserAnalyticsMetadata,
+	isAllowedAnonymousBrowserProductEvent,
 	isAuthenticatedAnalyticsRequestCandidate,
-	isTrustedAnalyticsRequest,
 	normalizeGeoHeader,
 	normalizeProductEventBatch,
 	ProductAnalyticsRateLimiter,
@@ -88,14 +89,17 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
 							origin: headers.origin,
 							secFetchSite: headers["sec-fetch-site"],
 						};
-						const isBrowserRequest =
-							isTrustedAnalyticsRequest(requestMetadata, allowedOrigins) &&
-							verifyProductAnalyticsBrowserToken(
+						const browserClaims =
+							hasExpectedBrowserAnalyticsMetadata(
+								requestMetadata,
+								allowedOrigins,
+							) &&
+							readProductAnalyticsBrowserTokenClaims(
 								readProductAnalyticsBrowserToken(headers.cookie),
 								serverEnv().NEXTAUTH_SECRET,
 							);
 						if (
-							!isBrowserRequest &&
+							!browserClaims &&
 							!isAuthenticatedAnalyticsRequestCandidate(requestMetadata)
 						) {
 							return yield* Effect.fail(new HttpApiError.BadRequest());
@@ -126,7 +130,16 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
 						}
 
 						const actor = yield* resolveProductAnalyticsActor;
-						if (!isBrowserRequest && !actor) {
+						if (
+							!actor &&
+							(!browserClaims ||
+								!events.every((event) =>
+									isAllowedAnonymousBrowserProductEvent(
+										event,
+										browserClaims.anonymousId,
+									),
+								))
+						) {
 							return yield* Effect.fail(new HttpApiError.BadRequest());
 						}
 						const rows = createProductEventRows(events, {

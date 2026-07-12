@@ -4,6 +4,7 @@ import {
 	PRODUCT_ANALYTICS_BROWSER_TOKEN_COOKIE,
 	PRODUCT_ANALYTICS_BROWSER_TOKEN_TTL_SECONDS,
 	readProductAnalyticsBrowserToken,
+	readProductAnalyticsBrowserTokenClaims,
 	verifyProductAnalyticsBrowserToken,
 } from "@/lib/analytics/browser-token";
 
@@ -12,8 +13,15 @@ const now = Date.parse("2026-07-12T12:00:00.000Z");
 
 describe("product analytics browser token", () => {
 	it("accepts an untampered token inside its bounded lifetime", () => {
-		const token = createProductAnalyticsBrowserToken(secret, now, "nonce");
+		const token = createProductAnalyticsBrowserToken(
+			secret,
+			"anonymous-1",
+			now,
+		);
 		expect(verifyProductAnalyticsBrowserToken(token, secret, now)).toBe(true);
+		expect(readProductAnalyticsBrowserTokenClaims(token, secret, now)).toEqual({
+			anonymousId: "anonymous-1",
+		});
 		expect(
 			verifyProductAnalyticsBrowserToken(
 				token,
@@ -24,7 +32,11 @@ describe("product analytics browser token", () => {
 	});
 
 	it("rejects expired, future, tampered, and malformed tokens", () => {
-		const token = createProductAnalyticsBrowserToken(secret, now, "nonce");
+		const token = createProductAnalyticsBrowserToken(
+			secret,
+			"anonymous-1",
+			now,
+		);
 		expect(
 			verifyProductAnalyticsBrowserToken(
 				token,
@@ -34,7 +46,7 @@ describe("product analytics browser token", () => {
 		).toBe(false);
 		expect(
 			verifyProductAnalyticsBrowserToken(
-				createProductAnalyticsBrowserToken(secret, now + 61_000, "nonce"),
+				createProductAnalyticsBrowserToken(secret, "anonymous-1", now + 61_000),
 				secret,
 				now,
 			),
@@ -48,7 +60,11 @@ describe("product analytics browser token", () => {
 	});
 
 	it("reads only the analytics token cookie", () => {
-		const token = createProductAnalyticsBrowserToken(secret, now, "nonce");
+		const token = createProductAnalyticsBrowserToken(
+			secret,
+			"anonymous-1",
+			now,
+		);
 		expect(
 			readProductAnalyticsBrowserToken(
 				`other=value; ${PRODUCT_ANALYTICS_BROWSER_TOKEN_COOKIE}=${token}`,

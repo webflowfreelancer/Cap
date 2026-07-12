@@ -1,16 +1,20 @@
-import { PRODUCT_ANALYTICS_LIMITS } from "@cap/analytics";
+import {
+	PRODUCT_ANALYTICS_LIMITS,
+	type ProductEventInput,
+} from "@cap/analytics";
 import { describe, expect, it } from "vitest";
 import {
 	getProductAnalyticsRateLimitKey,
+	hasExpectedBrowserAnalyticsMetadata,
+	isAllowedAnonymousBrowserProductEvent,
 	isAuthenticatedAnalyticsRequestCandidate,
-	isTrustedAnalyticsRequest,
 	normalizeGeoHeader,
 	normalizeProductEventBatch,
 	ProductAnalyticsRateLimiter,
 } from "@/lib/analytics/request";
 
 const allowedOrigins = ["https://cap.so", "tauri://localhost"];
-const event = {
+const event: ProductEventInput = {
 	eventId: "event-1",
 	eventName: "page_view",
 	occurredAt: "2026-07-12T12:00:00.000Z",
@@ -20,7 +24,7 @@ const event = {
 };
 const now = Date.parse("2026-07-12T12:00:01.000Z");
 
-describe("isTrustedAnalyticsRequest", () => {
+describe("hasExpectedBrowserAnalyticsMetadata", () => {
 	it.each([
 		[
 			"same-origin browser",
@@ -31,12 +35,14 @@ describe("isTrustedAnalyticsRequest", () => {
 			{ origin: "https://cap.so", secFetchSite: "same-site" },
 		],
 	])("accepts %s", (_label, headers) => {
-		expect(isTrustedAnalyticsRequest(headers, allowedOrigins)).toBe(true);
+		expect(hasExpectedBrowserAnalyticsMetadata(headers, allowedOrigins)).toBe(
+			true,
+		);
 	});
 
 	it("rejects cross-site browser requests", () => {
 		expect(
-			isTrustedAnalyticsRequest(
+			hasExpectedBrowserAnalyticsMetadata(
 				{ origin: "https://attacker.example", secFetchSite: "cross-site" },
 				allowedOrigins,
 			),
@@ -44,12 +50,15 @@ describe("isTrustedAnalyticsRequest", () => {
 	});
 
 	it("rejects requests without browser metadata", () => {
-		expect(isTrustedAnalyticsRequest({}, allowedOrigins)).toBe(false);
+		expect(hasExpectedBrowserAnalyticsMetadata({}, allowedOrigins)).toBe(false);
 		expect(
-			isTrustedAnalyticsRequest({ origin: "https://cap.so" }, allowedOrigins),
+			hasExpectedBrowserAnalyticsMetadata(
+				{ origin: "https://cap.so" },
+				allowedOrigins,
+			),
 		).toBe(false);
 		expect(
-			isTrustedAnalyticsRequest(
+			hasExpectedBrowserAnalyticsMetadata(
 				{ origin: "https://cap.so", secFetchSite: "none" },
 				allowedOrigins,
 			),
@@ -69,15 +78,44 @@ describe("isTrustedAnalyticsRequest", () => {
 		).toBe(false);
 		expect(
 			isAuthenticatedAnalyticsRequestCandidate({
+				authorization: `Bearer ${"a".repeat(36)} extra`,
+			}),
+		).toBe(false);
+		expect(
+			isAuthenticatedAnalyticsRequestCandidate({
 				authorization: `Bearer ${"a".repeat(36)}`,
 				origin: "https://attacker.example",
 			}),
 		).toBe(true);
 	});
 
+	it("allows only bounded top-of-funnel web events without an actor", () => {
+		expect(isAllowedAnonymousBrowserProductEvent(event, "anonymous-1")).toBe(
+			true,
+		);
+		expect(
+			isAllowedAnonymousBrowserProductEvent(
+				{ ...event, eventName: "recording_started" },
+				"anonymous-1",
+			),
+		).toBe(false);
+		expect(
+			isAllowedAnonymousBrowserProductEvent(
+				{ ...event, anonymousId: "attacker-chosen" },
+				"anonymous-1",
+			),
+		).toBe(false);
+		expect(
+			isAllowedAnonymousBrowserProductEvent(
+				{ ...event, platform: "desktop" },
+				"anonymous-1",
+			),
+		).toBe(false);
+	});
+
 	it("rejects oversized declared bodies", () => {
 		expect(
-			isTrustedAnalyticsRequest(
+			hasExpectedBrowserAnalyticsMetadata(
 				{ contentLength: String(PRODUCT_ANALYTICS_LIMITS.requestBytes + 1) },
 				allowedOrigins,
 			),
@@ -87,9 +125,9 @@ describe("isTrustedAnalyticsRequest", () => {
 	it.each(["invalid", "-1", "1.5"])(
 		"rejects malformed content length %s",
 		(contentLength) => {
-			expect(isTrustedAnalyticsRequest({ contentLength }, allowedOrigins)).toBe(
-				false,
-			);
+			expect(
+				hasExpectedBrowserAnalyticsMetadata({ contentLength }, allowedOrigins),
+			).toBe(false);
 		},
 	);
 });

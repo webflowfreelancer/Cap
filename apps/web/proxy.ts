@@ -1,3 +1,4 @@
+import { PRODUCT_ANALYTICS_ANONYMOUS_ID_COOKIE } from "@cap/analytics";
 import { db } from "@cap/database";
 import { organizations } from "@cap/database/schema";
 import { buildEnv, serverEnv } from "@cap/env";
@@ -5,10 +6,11 @@ import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { type NextRequest, NextResponse, userAgent } from "next/server";
 import {
+	createProductAnalyticsAnonymousId,
 	createProductAnalyticsBrowserToken,
 	PRODUCT_ANALYTICS_BROWSER_TOKEN_COOKIE,
 	PRODUCT_ANALYTICS_BROWSER_TOKEN_TTL_SECONDS,
-	verifyProductAnalyticsBrowserToken,
+	readProductAnalyticsBrowserTokenClaims,
 } from "@/lib/analytics/browser-token";
 
 const addHttps = (s?: string) => {
@@ -34,10 +36,18 @@ const nextWithAnalyticsToken = (
 	const token = request.cookies.get(
 		PRODUCT_ANALYTICS_BROWSER_TOKEN_COOKIE,
 	)?.value;
-	if (!verifyProductAnalyticsBrowserToken(token, secret)) {
+	const claims = readProductAnalyticsBrowserTokenClaims(token, secret);
+	const existingAnonymousId = request.cookies.get(
+		PRODUCT_ANALYTICS_ANONYMOUS_ID_COOKIE,
+	)?.value;
+	const anonymousId =
+		existingAnonymousId && existingAnonymousId.length <= 128
+			? existingAnonymousId
+			: (claims?.anonymousId ?? createProductAnalyticsAnonymousId());
+	if (!claims || claims.anonymousId !== anonymousId) {
 		response.cookies.set(
 			PRODUCT_ANALYTICS_BROWSER_TOKEN_COOKIE,
-			createProductAnalyticsBrowserToken(secret),
+			createProductAnalyticsBrowserToken(secret, anonymousId),
 			{
 				httpOnly: true,
 				maxAge: PRODUCT_ANALYTICS_BROWSER_TOKEN_TTL_SECONDS,
@@ -46,6 +56,14 @@ const nextWithAnalyticsToken = (
 				secure: process.env.NODE_ENV === "production",
 			},
 		);
+	}
+	if (existingAnonymousId !== anonymousId) {
+		response.cookies.set(PRODUCT_ANALYTICS_ANONYMOUS_ID_COOKIE, anonymousId, {
+			maxAge: 365 * 24 * 60 * 60,
+			path: "/",
+			sameSite: "lax",
+			secure: process.env.NODE_ENV === "production",
+		});
 	}
 	return response;
 };

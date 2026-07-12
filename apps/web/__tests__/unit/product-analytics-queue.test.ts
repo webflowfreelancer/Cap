@@ -5,6 +5,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	createProductEventId,
+	getOrCreateBrowserAnonymousId,
 	getOrCreateStorageId,
 	ProductAnalyticsQueue,
 	type ProductAnalyticsTransport,
@@ -230,6 +231,17 @@ describe("browser analytics identity", () => {
 		const storage = { getItem: vi.fn(() => null), setItem: vi.fn() };
 		expect(getOrCreateStorageId(storage, "key", () => "new-id")).toBe("new-id");
 		expect(storage.setItem).toHaveBeenCalledWith("key", "new-id");
+	});
+
+	it("uses the server-issued cookie identity", () => {
+		const storage = { getItem: vi.fn(() => "stale-id"), setItem: vi.fn() };
+		expect(
+			getOrCreateBrowserAnonymousId(storage, "signed-id", () => "new-id"),
+		).toBe("signed-id");
+		expect(storage.setItem).toHaveBeenCalledWith(
+			"cap_analytics_anonymous_id_v1",
+			"signed-id",
+		);
 	});
 
 	it("falls back when storage is unavailable", () => {

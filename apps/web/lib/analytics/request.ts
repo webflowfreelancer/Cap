@@ -20,6 +20,14 @@ interface ProductAnalyticsRateLimiterOptions {
 }
 
 const ALLOWED_FETCH_SITES = new Set(["same-origin", "same-site"]);
+const ANONYMOUS_BROWSER_EVENT_NAMES = new Set([
+	"page_view",
+	"download_cta_clicked",
+	"pricing_cta_clicked",
+	"cli_install_command_copied",
+	"auth_started",
+	"auth_email_sent",
+]);
 
 export class ProductAnalyticsRateLimiter {
 	private readonly buckets = new Map<
@@ -71,7 +79,7 @@ export class ProductAnalyticsRateLimiter {
 	}
 }
 
-export function isTrustedAnalyticsRequest(
+export function hasExpectedBrowserAnalyticsMetadata(
 	headers: AnalyticsRequestHeaders,
 	allowedOrigins: readonly string[],
 ) {
@@ -88,8 +96,19 @@ export function isAuthenticatedAnalyticsRequestCandidate(
 	headers: AnalyticsRequestHeaders,
 ) {
 	if (!hasValidContentLength(headers.contentLength)) return false;
-	const token = headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+	const token = headers.authorization?.match(/^Bearer\s+([^\s]+)\s*$/i)?.[1];
 	return token?.length === 36;
+}
+
+export function isAllowedAnonymousBrowserProductEvent(
+	event: ProductEventInput,
+	anonymousId: string,
+) {
+	return (
+		event.platform === "web" &&
+		event.anonymousId === anonymousId &&
+		ANONYMOUS_BROWSER_EVENT_NAMES.has(event.eventName)
+	);
 }
 
 function hasValidContentLength(value?: string) {
