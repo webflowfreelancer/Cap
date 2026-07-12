@@ -289,7 +289,7 @@ const validateAnalyticsProject = (projectDir = TINYBIRD_PROJECT_DIR) => {
 		if (product.partitionKey !== "toYYYYMM(occurred_at)") {
 			issues.push("product_events_v1 must use monthly event-time partitions");
 		}
-		if (product.ttl !== "occurred_at + INTERVAL 400 DAY") {
+		if (product.ttl !== "toDateTime(occurred_at) + INTERVAL 400 DAY") {
 			issues.push("product_events_v1 must retain events for 400 days");
 		}
 		if (!hasToken(product, "product_events_ingest", "APPEND")) {

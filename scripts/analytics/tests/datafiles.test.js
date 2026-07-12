@@ -64,7 +64,7 @@ test("product datasource matches the runtime event contract", () => {
 	assert.equal(datasource.sortingKey, "event_id");
 	assert.equal(datasource.versionColumn, "received_at");
 	assert.equal(datasource.partitionKey, "toYYYYMM(occurred_at)");
-	assert.equal(datasource.ttl, "occurred_at + INTERVAL 400 DAY");
+	assert.equal(datasource.ttl, "toDateTime(occurred_at) + INTERVAL 400 DAY");
 	assert.deepEqual(datasource.tokens, [
 		{ name: "product_events_ingest", scope: "APPEND" },
 		{ name: "product_events_agent_read", scope: "READ" },
