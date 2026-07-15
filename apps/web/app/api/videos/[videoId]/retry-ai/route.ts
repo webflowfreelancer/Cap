@@ -5,6 +5,7 @@ import type { VideoMetadata } from "@cap/database/types";
 import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { isSummaryProviderConfigured } from "@/lib/ai-provider-config";
 import { startAiGeneration } from "@/lib/generate-ai";
 import { isAiGenerationEnabled } from "@/utils/flags";
 
@@ -36,6 +37,13 @@ export async function POST(
 		const video = videoQuery[0];
 		if (video.ownerId !== user.id) {
 			return Response.json({ error: "Unauthorized" }, { status: 403 });
+		}
+
+		if (!isSummaryProviderConfigured()) {
+			return Response.json(
+				{ error: "Summary provider is not configured" },
+				{ status: 503 },
+			);
 		}
 
 		if (video.transcriptionStatus !== "COMPLETE") {

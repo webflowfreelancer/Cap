@@ -63,8 +63,22 @@ export async function getVideoStatus(
 	if (!video) throw new Error("Video not found");
 
 	const metadata: VideoMetadata = (video.metadata as VideoMetadata) || {};
+	const transcriptionProviderConfigured = isTranscriptionProviderConfigured();
 
-	if (!video.transcriptionStatus && isTranscriptionProviderConfigured()) {
+	if (!video.transcriptionStatus && !transcriptionProviderConfigured) {
+		return {
+			transcriptionStatus: "ERROR",
+			aiGenerationStatus:
+				(metadata.aiGenerationStatus as AiGenerationStatus) || null,
+			name: video.name,
+			aiTitle: metadata.aiTitle || null,
+			summary: metadata.summary || null,
+			chapters: metadata.chapters || null,
+			error: "Transcription provider is not configured",
+		};
+	}
+
+	if (!video.transcriptionStatus && transcriptionProviderConfigured) {
 		const activeUpload = await db()
 			.select({
 				videoId: videoUploads.videoId,

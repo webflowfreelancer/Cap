@@ -4,6 +4,7 @@ import { videos } from "@cap/database/schema";
 import type { Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { isTranscriptionProviderConfigured } from "@/lib/ai-provider-config";
 
 export async function POST(
 	_request: Request,
@@ -34,6 +35,13 @@ export async function POST(
 		const video = videoQuery[0];
 		if (!video || video.ownerId !== user.id) {
 			return Response.json({ error: "Unauthorized" }, { status: 403 });
+		}
+
+		if (!isTranscriptionProviderConfigured()) {
+			return Response.json(
+				{ error: "Transcription provider is not configured" },
+				{ status: 503 },
+			);
 		}
 
 		// Reset status to null - this will trigger automatic retry via get-status.ts
