@@ -18,6 +18,7 @@ RUN pnpm run build:web
 FROM base AS runner
 WORKDIR /app
 
+RUN apk add --no-cache ffmpeg
 RUN addgroup -g 1001 -S nodejs
 RUN adduser -S nextjs -u 1001
 
@@ -33,5 +34,6 @@ COPY --from=builder --chown=nextjs:nodejs /app/packages/database/migrations ./ap
 USER nextjs
 
 EXPOSE 3000
+ENV HOSTNAME=0.0.0.0
 
-CMD HOSTNAME="0.0.0.0" node apps/web/server.js
+CMD ["node", "apps/web/server.js"]
