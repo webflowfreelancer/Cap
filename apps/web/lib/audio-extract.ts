@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, isAbsolute, join, resolve } from "node:path";
 import ffmpegStaticPath from "ffmpeg-static";
 
 let cachedFfmpegPath: string | null = null;
@@ -51,6 +51,102 @@ export interface AudioExtractionResult {
 	filePath: string;
 	mimeType: string;
 	cleanup: () => Promise<void>;
+}
+
+export interface AudioUploadChunk {
+	buffer: Buffer;
+	startSeconds: number;
+}
+
+const AUDIO_UPLOAD_CHUNK_SECONDS = 5 * 60;
+
+export async function splitAudioForUpload(
+	audioBuffer: Buffer,
+	maxBytes: number,
+	forceChunking = false,
+): Promise<AudioUploadChunk[]> {
+	if (audioBuffer.length <= maxBytes && !forceChunking) {
+		return [{ buffer: audioBuffer, startSeconds: 0 }];
+	}
+
+	const ffmpeg = getFfmpegPath();
+	const chunkDirectory = await fs.mkdtemp(join(tmpdir(), "cap-audio-chunks-"));
+	const inputPath = join(chunkDirectory, "input.mp3");
+	const listPath = join(chunkDirectory, "chunks.csv");
+	const outputPattern = join(chunkDirectory, "chunk-%03d.mp3");
+
+	try {
+		await fs.writeFile(inputPath, audioBuffer);
+		await new Promise<void>((resolve, reject) => {
+			const proc = spawn(
+				ffmpeg,
+				[
+					"-i",
+					inputPath,
+					"-c",
+					"copy",
+					"-f",
+					"segment",
+					"-segment_time",
+					String(AUDIO_UPLOAD_CHUNK_SECONDS),
+					"-reset_timestamps",
+					"1",
+					"-segment_list",
+					listPath,
+					"-segment_list_type",
+					"csv",
+					"-y",
+					outputPattern,
+				],
+				{ stdio: ["ignore", "ignore", "pipe"] },
+			);
+
+			let stderr = "";
+			proc.stderr?.on("data", (data: Buffer) => {
+				stderr += data.toString();
+			});
+			proc.on("error", reject);
+			proc.on("close", (code) => {
+				if (code === 0) resolve();
+				else
+					reject(
+						new Error(`Audio chunking failed with code ${code}: ${stderr}`),
+					);
+			});
+		});
+
+		const chunkRows = (await fs.readFile(listPath, "utf8"))
+			.trim()
+			.split("\n")
+			.filter(Boolean);
+		const chunks: AudioUploadChunk[] = [];
+
+		for (const row of chunkRows) {
+			const [fileName, start] = row.split(",");
+			if (!fileName || start === undefined) {
+				throw new Error(`Invalid audio chunk metadata: ${row}`);
+			}
+			const cleanFileName = fileName.replace(/^"|"$/g, "");
+			const chunkPath = isAbsolute(cleanFileName)
+				? cleanFileName
+				: join(chunkDirectory, cleanFileName);
+			const startSeconds = Number(start);
+			if (!Number.isFinite(startSeconds)) {
+				throw new Error(`Invalid audio chunk start time: ${row}`);
+			}
+			const buffer = await fs.readFile(chunkPath);
+			if (buffer.length > maxBytes) {
+				throw new Error(
+					`Audio chunk exceeds provider upload limit: ${buffer.length} bytes`,
+				);
+			}
+			chunks.push({ buffer, startSeconds });
+		}
+
+		return chunks;
+	} finally {
+		await fs.rm(chunkDirectory, { recursive: true, force: true });
+	}
 }
 
 export async function extractAudioFromUrl(

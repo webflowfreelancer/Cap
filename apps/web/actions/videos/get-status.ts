@@ -3,11 +3,14 @@
 import { db } from "@cap/database";
 import { users, videos, videoUploads } from "@cap/database/schema";
 import type { VideoMetadata } from "@cap/database/types";
-import { serverEnv } from "@cap/env";
 import { provideOptionalAuth, VideosPolicy } from "@cap/web-backend";
 import { Policy, type Video } from "@cap/web-domain";
 import { eq } from "drizzle-orm";
 import { Effect, Exit } from "effect";
+import {
+	isSummaryProviderConfigured,
+	isTranscriptionProviderConfigured,
+} from "@/lib/ai-provider-config";
 import {
 	isRetryableDesktopSegmentsFinalizationError,
 	queueDesktopSegmentsFinalization,
@@ -61,7 +64,7 @@ export async function getVideoStatus(
 
 	const metadata: VideoMetadata = (video.metadata as VideoMetadata) || {};
 
-	if (!video.transcriptionStatus && serverEnv().DEEPGRAM_API_KEY) {
+	if (!video.transcriptionStatus && isTranscriptionProviderConfigured()) {
 		const activeUpload = await db()
 			.select({
 				videoId: videoUploads.videoId,
@@ -156,7 +159,7 @@ export async function getVideoStatus(
 		video.transcriptionStatus === "COMPLETE" &&
 		!metadata.aiGenerationStatus &&
 		!metadata.summary &&
-		(serverEnv().GROQ_API_KEY || serverEnv().OPENAI_API_KEY);
+		isSummaryProviderConfigured();
 
 	if (shouldTriggerAiGeneration) {
 		try {

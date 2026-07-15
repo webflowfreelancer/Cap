@@ -43,6 +43,10 @@ import {
 	getDashboardData,
 	type OrganizationSettings,
 } from "@/app/(org)/dashboard/dashboard-data";
+import {
+	isSummaryProviderConfigured,
+	isTranscriptionProviderConfigured,
+} from "@/lib/ai-provider-config";
 import { completeDesktopSegmentsManifestAndQueue } from "@/lib/desktop-segments-recovery";
 import { createNotification } from "@/lib/Notification";
 import {
@@ -556,12 +560,11 @@ async function AuthorizedContent({
 		organizationSettings: video.orgSettings,
 		spaces: sharedSpaces.filter((space) => space.id !== space.organizationId),
 	});
-	const env = serverEnv();
 	const transcriptionGenerationAvailable =
 		!video.isScreenshot &&
-		Boolean(env.DEEPGRAM_API_KEY) &&
+		isTranscriptionProviderConfigured() &&
 		!rules.settings.disableTranscript;
-	const aiProviderAvailable = Boolean(env.GROQ_API_KEY || env.OPENAI_API_KEY);
+	const aiProviderAvailable = isSummaryProviderConfigured();
 
 	let aiGenerationEnabled = false;
 	const videoOwnerQuery = await db()

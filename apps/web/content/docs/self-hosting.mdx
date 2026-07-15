@@ -110,12 +110,42 @@ By default, login links are printed to the server logs. To send emails:
 
 ### AI Features
 
-For video transcription and AI summaries:
+Cap supports separate providers for transcription and summaries. To use one OpenAI project for both:
 
 ```bash
-DEEPGRAM_API_KEY=your-key    # Transcription
-GROQ_API_KEY=your-key        # AI summaries (preferred)
-OPENAI_API_KEY=your-key      # AI summaries (fallback)
+OPENAI_API_KEY=your-key
+TRANSCRIPTION_PROVIDER=openai
+TRANSCRIPTION_MODEL=gpt-4o-transcribe-diarize
+TRANSCRIPTION_RESPONSE_FORMAT=diarized_json
+SUMMARY_PROVIDER=openai
+SUMMARY_MODEL=gpt-4o-mini
+```
+
+`whisper-1` with `TRANSCRIPTION_RESPONSE_FORMAT=vtt` is also supported. Cap automatically splits audio that exceeds the transcription API upload limit, uses shorter chunks for diarization responses, and joins the timestamped captions.
+
+For providers that expose OpenAI-compatible transcription or chat-completion endpoints:
+
+```bash
+TRANSCRIPTION_PROVIDER=openai-compatible
+TRANSCRIPTION_API_KEY=your-key
+TRANSCRIPTION_BASE_URL=https://provider.example/v1
+TRANSCRIPTION_MODEL=provider-model
+TRANSCRIPTION_RESPONSE_FORMAT=vtt
+
+SUMMARY_PROVIDER=openai-compatible
+SUMMARY_API_KEY=your-key
+SUMMARY_BASE_URL=https://provider.example/v1
+SUMMARY_MODEL=provider-model
+```
+
+The transcription provider must return timestamped `vtt`, `verbose_json`, or `diarized_json` output so Cap can build captions and chapters. Providers with a different protocol can be added behind the transcription or summary provider interfaces.
+
+The legacy variables continue to work. Without explicit provider selection, Cap uses Deepgram for transcription and prefers Groq with OpenAI as a summary fallback:
+
+```bash
+DEEPGRAM_API_KEY=your-key
+GROQ_API_KEY=your-key
+OPENAI_API_KEY=your-key
 ```
 
 ### Google OAuth

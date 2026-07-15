@@ -86,7 +86,7 @@ describe("transcribeVideo", () => {
 	});
 
 	describe("input validation", () => {
-		it("requires DEEPGRAM_API_KEY environment variable", async () => {
+		it("requires a configured transcription provider", async () => {
 			const { serverEnv } = await import("@cap/env");
 			vi.mocked(serverEnv).mockReturnValueOnce({
 				DEEPGRAM_API_KEY: undefined,

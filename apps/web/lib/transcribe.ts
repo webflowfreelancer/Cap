@@ -1,9 +1,9 @@
 import { db } from "@cap/database";
 import { organizations, videos, videoUploads } from "@cap/database/schema";
-import { serverEnv } from "@cap/env";
 import type { Video } from "@cap/web-domain";
 import { and, eq, isNull } from "drizzle-orm";
 import { start } from "workflow/api";
+import { isTranscriptionProviderConfigured } from "@/lib/ai-provider-config";
 import { transcribeVideoWorkflow } from "@/workflows/transcribe";
 
 type TranscribeResult = {
@@ -29,7 +29,7 @@ export async function transcribeVideo(
 	userId: string,
 	aiGenerationEnabled = false,
 ): Promise<TranscribeResult> {
-	if (!serverEnv().DEEPGRAM_API_KEY) {
+	if (!isTranscriptionProviderConfigured()) {
 		return {
 			success: false,
 			message: "Missing necessary environment variables",

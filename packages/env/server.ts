@@ -86,10 +86,34 @@ function createServerEnv() {
 				.describe("Comma-separated list of permitted signup domains"),
 
 			/// AI providers
-			DEEPGRAM_API_KEY: z.string().optional().describe("Audio transcription"),
+			TRANSCRIPTION_PROVIDER: z
+				.enum(["deepgram", "openai", "openai-compatible"])
+				.optional(),
+			TRANSCRIPTION_API_KEY: z.string().optional(),
+			TRANSCRIPTION_BASE_URL: z.string().url().optional(),
+			TRANSCRIPTION_MODEL: z.string().optional(),
+			TRANSCRIPTION_RESPONSE_FORMAT: z
+				.enum(["vtt", "verbose_json", "diarized_json"])
+				.optional(),
+			SUMMARY_PROVIDER: z
+				.enum(["groq", "openai", "openai-compatible"])
+				.optional(),
+			SUMMARY_API_KEY: z.string().optional(),
+			SUMMARY_BASE_URL: z.string().url().optional(),
+			SUMMARY_MODEL: z.string().optional(),
+			DEEPGRAM_API_KEY: z
+				.string()
+				.optional()
+				.describe("Legacy Deepgram transcription API key"),
 			ANTHROPIC_API_KEY: z.string().optional().describe("AI chat"),
-			OPENAI_API_KEY: z.string().optional().describe("AI summaries"),
-			GROQ_API_KEY: z.string().optional().describe("AI summaries"),
+			OPENAI_API_KEY: z
+				.string()
+				.optional()
+				.describe("OpenAI transcription and summary API key"),
+			GROQ_API_KEY: z
+				.string()
+				.optional()
+				.describe("Legacy Groq summary API key"),
 			REPLICATE_API_TOKEN: z
 				.string()
 				.optional()
